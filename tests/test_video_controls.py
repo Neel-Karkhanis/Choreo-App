@@ -12,7 +12,7 @@ moviepy_module.editor = editor_module
 sys.modules.setdefault("moviepy", moviepy_module)
 sys.modules["moviepy.editor"] = editor_module
 
-import video_controls
+import src.video_controls as video_controls
 
 
 class TestVideoControls(unittest.TestCase):
