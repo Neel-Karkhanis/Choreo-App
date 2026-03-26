@@ -2,6 +2,8 @@ import numpy as np
 from scipy.io import wavfile
 import matplotlib.pyplot as plt
 import os
+from scipy.ndimage import median_filter
+
 
 def load_audio(filepath):
     sample_rate, data = wavfile.read(filepath)
@@ -27,6 +29,14 @@ def stft(audio, window_size=2048, hop_length=512):
     window = np.array(window)
     window = window.T
     return window
+
+def compute_masks(fourier_transform, harm_size=31, perc_size=31):
+    mag = np.abs(fourier_transform)
+    
+    horizontal = median_filter(mag, size=(1, harm_size))
+    vertical = median_filter(mag, size=(perc_size, 1))
+    
+    return horizontal, vertical
 
 
  
