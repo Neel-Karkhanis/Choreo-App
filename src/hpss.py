@@ -38,8 +38,17 @@ def compute_masks(fourier_transform, harm_size=31, perc_size=31):
     
     return horizontal, vertical
 
+def build_masks(horizontal, vertical):
+    harmonic_mask = horizontal / (horizontal + vertical + 1e-8)
+    percussive_mask = vertical / (vertical + horizontal + 1e-8)
+    return harmonic_mask, percussive_mask
 
- 
+def apply_masks(harmonic_mask, percussive_mask, fourier_transform):
+    harmonic_spectrogram = harmonic_mask * fourier_transform
+    percussive_spectrogram = percussive_mask * fourier_transform
+    return harmonic_spectrogram, percussive_spectrogram
+
+
 
 
 
