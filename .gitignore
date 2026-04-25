@@ -9,3 +9,4 @@ __pycache__/
 .claude/
 test_files/
 __pycache__/
+cache/
