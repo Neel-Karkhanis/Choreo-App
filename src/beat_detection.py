@@ -1,120 +1,105 @@
+import os
 import numpy as np
-import librosa
+from beat_this.inference import File2Beats
 
+file2beats = File2Beats(checkpoint_path="final0", device="cpu")
 
-def detect_beats(audio, sr):
-    """Detect beat timestamps from audio data.
+def detect_beats(audio_path):
+    """Detect beat and downbeat timestamps in an audio file.
 
-    Args:
-        audio: NumPy array of audio samples.
-        sr: Sample rate of the audio.
-
-    Returns:
-        A NumPy array of beat timestamps in seconds.
-
-    Raises:
-        TypeError: If audio is not array-like with numeric values or sr is not numeric.
-        ValueError: If audio is empty or sr is not positive.
-    """
-    audio = np.asarray(audio)
-    if not np.issubdtype(audio.dtype, np.number):
-        raise TypeError("audio must contain numeric values")
-    if audio.size == 0:
-        raise ValueError("audio must not be empty")
-    if not isinstance(sr, (int, float)):
-        raise TypeError("sr must be numeric")
-    if sr <= 0:
-        raise ValueError("sr must be positive")
-
-    _, beats = librosa.beat.beat_track(y=audio, sr=sr)
-    return librosa.frames_to_time(beats, sr=sr)
-
-
-def merge_beats(drum_beats, mix_beats, gap_threshold=1.0):
-    """Merge two beat arrays, keeping mix beats that are far enough from drum beats.
+    Runs the beat_this File2Beats model on the file at audio_path and
+    returns two arrays of timestamps in seconds: every detected beat,
+    and the subset of those beats that are downbeats (the "1" of each bar).
 
     Args:
-        drum_beats: NumPy array of beat timestamps from the drum stem, in seconds.
-        mix_beats: NumPy array of beat timestamps from the full mix, in seconds.
-        gap_threshold: Minimum distance in seconds a mix beat must be from all
-            drum beats to be included in the result.
+        audio_path: Path to the audio file.
 
     Returns:
-        A sorted NumPy array of merged beat timestamps in seconds.
+        A tuple (beats, downbeats) of numpy arrays of timestamps in seconds.
 
     Raises:
-        TypeError: If drum_beats or mix_beats are not array-like, or
-            gap_threshold is not numeric.
-        ValueError: If gap_threshold is not positive.
+        TypeError: If audio_path is not a string.
+        ValueError: If audio_path is empty.
+        FileNotFoundError: If audio_path does not exist.
     """
-    drum_beats = np.asarray(drum_beats)
-    mix_beats = np.asarray(mix_beats)
+    if not isinstance(audio_path, str):
+        raise TypeError("audio_path must be a string")
+    if not audio_path:
+        raise ValueError("audio_path must not be empty")
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"File not found: {audio_path}")
 
-    if not np.issubdtype(drum_beats.dtype, np.number):
-        raise TypeError("drum_beats must contain numeric values")
-    if not np.issubdtype(mix_beats.dtype, np.number):
-        raise TypeError("mix_beats must contain numeric values")
-    if not isinstance(gap_threshold, (int, float)):
-        raise TypeError("gap_threshold must be numeric")
-    if gap_threshold <= 0:
-        raise ValueError("gap_threshold must be positive")
+    beats, downbeats = file2beats(audio_path)
+    return (beats, downbeats)
 
-    if len(drum_beats) == 0:
-        return mix_beats
+def eight_count_grouping(beats, downbeats, subdivisions=1):
+    """Align beats to the first downbeat and group them into eight-counts.
 
-    merged = list(drum_beats)
-    for t in mix_beats:
-        if min(abs(drum_beats - t)) >= gap_threshold:
-            merged.append(t)
-
-    return np.sort(merged)
-
-def eight_count_grouping(merged_beats, subdivisions=1):
-    """Group beats into eight-counts, optionally subdividing between beats.
+    The beats array is trimmed to start at the first downbeat, then optionally
+    subdivided so each beat interval is split into `subdivisions` equal parts.
+    Each entry in the returned groups is a (timestamp, is_beat) tuple, where
+    is_beat is True for original beats and False for inserted subdivision points.
+    Entries are then chunked into groups of size 8 * subdivisions; the final
+    group may be partial.
 
     Args:
-        merged_beats: Array-like of beat timestamps in seconds.
-        subdivisions: Number of subdivisions per beat interval. Must be a
-            positive integer. Defaults to 1 (no subdivision).
+        beats: 1-D numpy array of beat timestamps in seconds.
+        downbeats: 1-D numpy array of downbeat timestamps in seconds. The
+            first downbeat must appear in `beats`.
+        subdivisions: Positive integer <= 4. The number of equal parts each
+            beat interval is split into. 1 means no subdivision.
 
     Returns:
-        A list of eight-count groups. Each group is a list of
-        (timestamp, is_beat) tuples, where is_beat is True for original
-        beats and False for interpolated subdivision points.
+        A list of groups, where each group is a list of (timestamp, is_beat)
+        tuples of length up to 8 * subdivisions.
 
     Raises:
-        TypeError: If merged_beats is not array-like with numeric values,
-            or subdivisions is not an integer.
-        ValueError: If merged_beats is empty or subdivisions is not positive.
+        TypeError: If beats or downbeats is not a numpy array, or if
+            subdivisions is not an int.
+        ValueError: If beats or downbeats is empty, if subdivisions is not
+            in the range 1..4, or if the first downbeat is not in beats.
     """
-    try:
-        merged_beats = np.asarray(merged_beats, dtype=float)
-    except (ValueError, TypeError):
-        raise TypeError("merged_beats must contain numeric values")
-    if merged_beats.size == 0:
-        raise ValueError("merged_beats must not be empty")
-    if not isinstance(subdivisions, int):
-        raise TypeError("subdivisions must be an integer")
-    if subdivisions <= 0:
-        raise ValueError("subdivisions must be positive")
+    if not isinstance(beats, np.ndarray):
+        raise TypeError("beats must be a numpy array")
+    if not isinstance(downbeats, np.ndarray):
+        raise TypeError("downbeats must be a numpy array")
+    if not np.issubdtype(beats.dtype, np.number):
+        raise TypeError("beats must contain numeric values")
+    if not np.issubdtype(downbeats.dtype, np.number):
+        raise TypeError("downbeats must contain numeric values")
+    if beats.size == 0:
+        raise ValueError("beats must not be empty")
+    if downbeats.size == 0:
+        raise ValueError("downbeats must not be empty")
+    if not isinstance(subdivisions, int) or isinstance(subdivisions, bool):
+        raise TypeError("subdivisions must be an int")
+    if subdivisions < 1 or subdivisions > 4:
+        raise ValueError("subdivisions must be a positive integer <= 4")
+
+    matches = np.where(beats == downbeats[0])[0]
+    if len(matches) == 0:
+        raise ValueError("First downbeat isn't in beats")
+
+    start_index = matches[0]
+    beats = beats[start_index:]
 
     subdivided_list = []
     if subdivisions != 1:
-        for i, beat in enumerate(merged_beats):
-            if i >= len(merged_beats) - 1:
+        for i, beat in enumerate(beats):
+            if i >= len(beats) - 1:
                 break
-            
+
             subdivided_list.append((beat, True))
-            time = merged_beats[i+1] - beat
+            time = beats[i+1] - beat
             time /= subdivisions
             for j in range(subdivisions - 1):
                 subdivided_list.append((beat + (j+1)*time, False))
             time = 0
 
-        subdivided_list.append((merged_beats[-1], True))
+        subdivided_list.append((beats[-1], True))
 
     else:
-        for beat in merged_beats:
+        for beat in beats:
             subdivided_list.append((beat, True))
 
     grouped_counts = []

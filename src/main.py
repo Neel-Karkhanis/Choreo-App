@@ -1,7 +1,6 @@
 import source_separation
-import beat_detection
 import audio_utils
-
+import beat_detection
 
 def main():
     #loading audio
@@ -13,11 +12,9 @@ def main():
     # intrumental = source_separation.get_instrumental(stems) (not going to be used yet)
 
     #beat detection
-    drum_audio, drum_sr = audio_utils.load_audio(stems["drums"])
-    drum_beats = beat_detection.detect_beats(drum_audio, drum_sr)
-    mix_beats = beat_detection.detect_beats(audio, sr)
-    merged_beats = beat_detection.merge_beats(drum_beats, mix_beats)
-    grouped_counts = beat_detection.eight_count_grouping(merged_beats, subdivisions=2)
+    beats, downbeats = beat_detection.detect_beats(file_path)
+
+    grouped_counts = beat_detection.eight_count_grouping(beats, downbeats, subdivisions=2)
     for i, eight_count in enumerate(grouped_counts):
         print(f"Eight count {i+1}: {eight_count}")
         print("\n")
