@@ -13,11 +13,7 @@ def main():
 
     #beat detection
     beats, downbeats = beat_detection.detect_beats(file_path)
-
     grouped_counts = beat_detection.eight_count_grouping(beats, downbeats, subdivisions=2)
-    for i, eight_count in enumerate(grouped_counts):
-        print(f"Eight count {i+1}: {eight_count}")
-        print("\n")
 
 
 if __name__ == "__main__":

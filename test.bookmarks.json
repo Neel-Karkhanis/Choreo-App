@@ -1,0 +1,26 @@
+{
+  "fc2d5de7-ee91-4197-b4e3-1fcda11a1523": {
+    "id": "fc2d5de7-ee91-4197-b4e3-1fcda11a1523",
+    "timestamp": 10.0,
+    "label": "testing label different",
+    "snap_mode": "8-count"
+  },
+  "e6ed2d32-0551-4b40-961a-984bc699991d": {
+    "id": "e6ed2d32-0551-4b40-961a-984bc699991d",
+    "timestamp": 10.0,
+    "label": "testing label same",
+    "snap_mode": "4-count"
+  },
+  "9d4fe5b1-788b-4232-96aa-df98d6382fca": {
+    "id": "9d4fe5b1-788b-4232-96aa-df98d6382fca",
+    "timestamp": 14.2,
+    "label": "testing label same",
+    "snap_mode": "none"
+  },
+  "8f0d546b-4513-43e2-afcf-3c93b42de5eb": {
+    "id": "8f0d546b-4513-43e2-afcf-3c93b42de5eb",
+    "timestamp": 15.0,
+    "label": "testing label same",
+    "snap_mode": "beat"
+  }
+}
