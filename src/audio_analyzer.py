@@ -5,6 +5,34 @@ import bookmark
 
 
 def analyze_audio(file_path, subdivisions=1):
+    """Run the full audio analysis pipeline and return a serializable result.
+
+    Separates the audio into stems via Demucs, detects beats and downbeats,
+    groups beats into eight-counts (optionally subdivided), runs onset
+    detection on the drums and bass stems, and loads any existing bookmarks
+    for the file. All numpy arrays are converted to plain Python lists so
+    the returned dict is directly JSON-serializable.
+
+    Args:
+        file_path: Path to the audio file to analyze.
+        subdivisions: Positive integer <= 4 passed through to
+            ``beat_detection.eight_count_grouping``. 1 means no subdivision.
+
+    Returns:
+        A dict with the following keys:
+            - ``audio_path``: The input file path.
+            - ``stems``: Dict mapping stem names to .wav file paths.
+            - ``instrumental``: Path to the combined drums+bass+other track.
+            - ``beats``: List of beat timestamps in seconds.
+            - ``downbeats``: List of downbeat timestamps in seconds.
+            - ``grouped_counts``: List of eight-count groups, each a list of
+              ``(timestamp, is_beat)`` tuples.
+            - ``subdivisions``: The subdivisions value used.
+            - ``onsets``: Dict with ``"drums"`` and ``"bass"`` keys, each
+              mapping to a list of onset timestamps in seconds.
+            - ``existing_bookmarks``: Dict of saved bookmarks for this file,
+              empty if none exist."""
+
     # audio separation
     stems = source_separation.separate(file_path)
     instrumental = source_separation.get_instrumental(stems)
