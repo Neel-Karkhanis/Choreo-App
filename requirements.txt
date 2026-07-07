@@ -1,7 +1,6 @@
 antlr4-python3-runtime==4.9.3
-audioop-lts==0.2.2
 audioread==3.1.0
-beat-this @ https://github.com/CPJKU/beat_this/archive/main.zip#sha256=39e734a4ea0382b1b85c571ed280d129f2e3dd6286f2c5c6729e5804eba808b1
+beat_this @ git+https://github.com/CPJKU/beat_this.git
 certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.6
@@ -56,9 +55,6 @@ setuptools==81.0.0
 six==1.17.0
 soundfile==0.13.1
 soxr==1.0.0
-standard-aifc==3.13.0
-standard-chunk==3.13.0
-standard-sunau==3.13.0
 submitit==1.5.4
 sympy==1.14.0
 threadpoolctl==3.6.0
