@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import type WaveSurfer from 'wavesurfer.js'
+import Timeline from './Timeline'
 
 interface Track {
   id: string
@@ -37,6 +39,9 @@ function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Single source of truth for time↔pixel mapping; later layers (beat grid,
+  // overlays) read duration/zoom/scroll from this instance.
+  const [, setWavesurfer] = useState<WaveSurfer | null>(null)
 
   useEffect(() => {
     fetchJson<{ tracks: Track[] }>('/api/tracks')
@@ -89,7 +94,11 @@ function App() {
             {analysis.filename} — {analysis.tempo ?? '?'} BPM, {analysis.beats.length}{' '}
             beats, {analysis.eight_counts.length} eight-counts (full JSON in console)
           </p>
-          <audio key={analysis.id} controls src={analysis.audio_url} />
+          <Timeline
+            key={analysis.id}
+            audioUrl={analysis.audio_url}
+            onReady={setWavesurfer}
+          />
         </section>
       )}
     </main>
