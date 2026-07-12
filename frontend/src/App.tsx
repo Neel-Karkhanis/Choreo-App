@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type WaveSurfer from 'wavesurfer.js'
-import Timeline from './Timeline'
+import Timeline, { type GridData } from './Timeline'
 
 interface Track {
   id: string
@@ -27,6 +27,28 @@ interface Analysis {
   stems: Stem[]
 }
 
+// Grid data must match the schema v2 contract exactly; on any mismatch we
+// render an error instead of the grid rather than inferring a shape.
+function gridFromAnalysis(a: Analysis): { grid?: GridData; gridError?: string } {
+  const isNumbers = (xs: unknown): xs is number[] =>
+    Array.isArray(xs) && xs.every((x) => typeof x === 'number' && Number.isFinite(x))
+  if (!isNumbers(a.beats)) return { gridError: 'analysis.beats is not number[]' }
+  const isIndices = (xs: unknown): xs is number[] =>
+    Array.isArray(xs) &&
+    xs.every((x) => Number.isInteger(x) && x >= 0 && x < a.beats.length)
+  if (!isIndices(a.downbeats))
+    return { gridError: 'analysis.downbeats is not an array of indices into beats' }
+  if (!isIndices(a.eight_counts))
+    return { gridError: 'analysis.eight_counts is not an array of indices into beats' }
+  return {
+    grid: {
+      beats: a.beats,
+      downbeatIndices: a.downbeats,
+      eightCountIndices: a.eight_counts,
+    },
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
@@ -42,6 +64,10 @@ function App() {
   // Single source of truth for time↔pixel mapping; later layers (beat grid,
   // overlays) read duration/zoom/scroll from this instance.
   const [, setWavesurfer] = useState<WaveSurfer | null>(null)
+  const { grid, gridError } = useMemo(
+    () => (analysis ? gridFromAnalysis(analysis) : {}),
+    [analysis],
+  )
 
   useEffect(() => {
     fetchJson<{ tracks: Track[] }>('/api/tracks')
@@ -94,9 +120,11 @@ function App() {
             {analysis.filename} — {analysis.tempo ?? '?'} BPM, {analysis.beats.length}{' '}
             beats, {analysis.eight_counts.length} eight-counts (full JSON in console)
           </p>
+          {gridError && <p className="error">Beat grid unavailable: {gridError}</p>}
           <Timeline
             key={analysis.id}
             audioUrl={analysis.audio_url}
+            grid={grid}
             onReady={setWavesurfer}
           />
         </section>
