@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type WaveSurfer from 'wavesurfer.js'
-import Timeline, { type GridData } from './Timeline'
+import Timeline, { type GridData, type OnsetData } from './Timeline'
 
 interface Track {
   id: string
@@ -13,7 +13,8 @@ interface Stem {
 }
 
 // Mirrors the analysis JSON contract (schema_version 2): downbeats and
-// eight_counts are integer indices into beats, not timestamps.
+// eight_counts are integer indices into beats, not timestamps. onsets.drums
+// and onsets.bass are plain timestamp lists, independent of the beat grid.
 interface Analysis {
   id: string
   filename: string
@@ -23,15 +24,17 @@ interface Analysis {
   beats: number[]
   downbeats: number[]
   eight_counts: number[]
+  onsets: { drums: number[]; bass: number[] }
   audio_url: string
   stems: Stem[]
 }
 
+const isNumbers = (xs: unknown): xs is number[] =>
+  Array.isArray(xs) && xs.every((x) => typeof x === 'number' && Number.isFinite(x))
+
 // Grid data must match the schema v2 contract exactly; on any mismatch we
 // render an error instead of the grid rather than inferring a shape.
 function gridFromAnalysis(a: Analysis): { grid?: GridData; gridError?: string } {
-  const isNumbers = (xs: unknown): xs is number[] =>
-    Array.isArray(xs) && xs.every((x) => typeof x === 'number' && Number.isFinite(x))
   if (!isNumbers(a.beats)) return { gridError: 'analysis.beats is not number[]' }
   const isIndices = (xs: unknown): xs is number[] =>
     Array.isArray(xs) &&
@@ -47,6 +50,15 @@ function gridFromAnalysis(a: Analysis): { grid?: GridData; gridError?: string } 
       eightCountIndices: a.eight_counts,
     },
   }
+}
+
+// Onsets are independent of the beat grid, so validation failures here
+// shouldn't block the grid from rendering — reported separately.
+function onsetsFromAnalysis(a: Analysis): { onsets?: OnsetData; onsetsError?: string } {
+  if (!a.onsets || !isNumbers(a.onsets.drums) || !isNumbers(a.onsets.bass)) {
+    return { onsetsError: 'analysis.onsets is not { drums: number[], bass: number[] }' }
+  }
+  return { onsets: { drums: a.onsets.drums, bass: a.onsets.bass } }
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -66,6 +78,10 @@ function App() {
   const [, setWavesurfer] = useState<WaveSurfer | null>(null)
   const { grid, gridError } = useMemo(
     () => (analysis ? gridFromAnalysis(analysis) : {}),
+    [analysis],
+  )
+  const { onsets, onsetsError } = useMemo(
+    () => (analysis ? onsetsFromAnalysis(analysis) : {}),
     [analysis],
   )
 
@@ -121,10 +137,12 @@ function App() {
             beats, {analysis.eight_counts.length} eight-counts (full JSON in console)
           </p>
           {gridError && <p className="error">Beat grid unavailable: {gridError}</p>}
+          {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
           <Timeline
             key={analysis.id}
             audioUrl={analysis.audio_url}
             grid={grid}
+            onsets={onsets}
             onReady={setWavesurfer}
           />
         </section>

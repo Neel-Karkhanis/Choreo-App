@@ -11,13 +11,27 @@ export interface GridData {
   eightCountIndices: number[]
 }
 
+// Onset data, already validated by the caller. Plain timestamps in seconds,
+// independent of the beat grid — not indices, not guaranteed to land on a beat.
+export interface OnsetData {
+  drums: number[]
+  bass: number[]
+}
+
 interface TimelineProps {
   audioUrl: string
   grid?: GridData
+  onsets?: OnsetData
   // Later layers (subdivisions, onset overlays) must position themselves via
   // this instance's own time↔pixel mapping — never independent coordinate math.
   onReady?: (wavesurfer: WaveSurfer) => void
 }
+
+// A beat's pulse tick is suppressed (not drawn) if a drum/bass onset lands
+// within this many milliseconds of it — the onset marker visually absorbs
+// that tick rather than drawing both on top of each other. Starting guess;
+// tune against a real track if it reads too aggressive or too loose.
+const ABSORPTION_TOLERANCE_MS = 60
 
 function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
@@ -29,7 +43,7 @@ function styleRegion(el: HTMLElement | null, styles: Partial<CSSStyleDeclaration
   if (el) Object.assign(el.style, styles)
 }
 
-function Timeline({ audioUrl, grid, onReady }: TimelineProps) {
+function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { wavesurfer, isReady, isPlaying, currentTime } = useWavesurfer({
     container: containerRef,
@@ -74,11 +88,24 @@ function Timeline({ audioUrl, grid, onReady }: TimelineProps) {
       styleRegion(region.element, { pointerEvents: 'none' })
     })
 
+    // Onset times (drums + bass) that suppress a nearby pulse tick — computed
+    // once up front so the beat loop below is a cheap lookup, not an O(n*m)
+    // rescan per beat.
+    const drumOnsets = onsets?.drums.filter(drawable) ?? []
+    const bassOnsets = onsets?.bass.filter(drawable) ?? []
+    const onsetTimes = [...drumOnsets, ...bassOnsets]
+    const isAbsorbed = (time: number) =>
+      onsetTimes.some((onset) => Math.abs(onset - time) * 1000 < ABSORPTION_TOLERANCE_MS)
+
     // Pulse ticks at every beat, bottom-anchored like a ruler; downbeats (each
-    // bar's "1") are taller and darker. pointerEvents none keeps wavesurfer's
-    // native click-to-seek working through the grid.
+    // bar's "1") are taller and darker. A tick within ABSORPTION_TOLERANCE_MS
+    // of a drum/bass onset is skipped — the onset marker below takes its
+    // place — and this applies to downbeats too, no special-casing.
+    // pointerEvents none keeps wavesurfer's native click-to-seek working
+    // through the grid.
     beats.forEach((time, i) => {
       if (!drawable(time)) return
+      if (isAbsorbed(time)) return
       const region = regions.addRegion({
         start: time,
         end: time,
@@ -97,8 +124,32 @@ function Timeline({ audioUrl, grid, onReady }: TimelineProps) {
       })
     })
 
+    // Onset markers on top of the grid: bass is the tallest marker, drums
+    // shorter than bass but taller than a normal pulse tick. Independent
+    // layers — both render even if they land on the same suppressed tick.
+    bassOnsets.forEach((time) => {
+      const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
+      styleRegion(region.element, {
+        pointerEvents: 'none',
+        borderLeft: '3px solid rgba(210, 30, 30, 0.9)',
+        borderRadius: '0',
+        height: '90%',
+        top: '5%',
+      })
+    })
+    drumOnsets.forEach((time) => {
+      const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
+      styleRegion(region.element, {
+        pointerEvents: 'none',
+        borderLeft: '2px solid rgba(30, 90, 210, 0.9)',
+        borderRadius: '0',
+        height: '45%',
+        top: '27.5%',
+      })
+    })
+
     return () => regions.destroy()
-  }, [wavesurfer, isReady, grid])
+  }, [wavesurfer, isReady, grid, onsets])
 
   const duration = isReady && wavesurfer ? wavesurfer.getDuration() : 0
 

@@ -48,7 +48,7 @@ STEM_NAMES = ("vocals", "drums", "bass", "other", "instrumental")
 
 # Bump when the analysis JSON shape changes; cached analysis.json files with
 # a different version are discarded and recomputed (stems stay cached).
-ANALYSIS_SCHEMA_VERSION = 2
+ANALYSIS_SCHEMA_VERSION = 3
 
 app = FastAPI(title="Choreo API")
 
@@ -113,10 +113,15 @@ def _analyze(audio_file):
     so markers always coincide with a beat exactly. The last eight-count
     index may start a partial group (fewer than 8 beats before the track
     ends); its extent is up to the next index, or the end of beats.
+
+    `onsets.drums` and `onsets.bass` are independent of the beat grid: plain
+    timestamp lists from onset detection on the separated stems, not indices,
+    and not guaranteed to land on a beat.
     """
     # Lazy imports: beat_detection loads the beat_this model at import time,
     # so the server boots fast and pays that cost on the first analysis.
     import beat_detection
+    import onset_detection
     import source_separation
 
     stems = source_separation.separate(str(audio_file))
@@ -124,6 +129,9 @@ def _analyze(audio_file):
 
     beats, downbeats = beat_detection.detect_beats(str(audio_file))
     groups = beat_detection.eight_count_grouping(beats, downbeats)
+
+    drum_onsets = onset_detection.detect_onsets(source_separation.get_drums(stems), "drums")
+    bass_onsets = onset_detection.detect_onsets(source_separation.get_bass(stems), "bass")
 
     if len(beats) >= 2:
         tempo = round(60.0 / float(np.median(np.diff(beats))), 1)
@@ -139,6 +147,10 @@ def _analyze(audio_file):
         "eight_counts": [
             _beat_index(beats, group[0][0], "eight-count start") for group in groups
         ],
+        "onsets": {
+            "drums": [round(float(t), 3) for t in drum_onsets],
+            "bass": [round(float(t), 3) for t in bass_onsets],
+        },
     }
 
 
