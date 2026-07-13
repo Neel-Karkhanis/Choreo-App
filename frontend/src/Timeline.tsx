@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useWavesurfer } from '@wavesurfer/react'
 import type WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/plugins/regions'
@@ -52,8 +53,19 @@ function styleRegion(el: HTMLElement | null, styles: Partial<CSSStyleDeclaration
   if (el) Object.assign(el.style, styles)
 }
 
+// Onset toggle buttons: active fills with the stem's marker color, inactive is
+// the plain default button. Placeholder styling — a later design pass owns
+// polish; only the active/inactive distinction matters here.
+function toggleStyle(active: boolean, color: string): CSSProperties {
+  return active ? { backgroundColor: color, borderColor: color, color: 'white' } : {}
+}
+
 function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // Session-only visibility toggles for the onset overlays; both start off,
+  // so the baseline view is pulse ticks + 8-count shading with no markers.
+  const [bassVisible, setBassVisible] = useState(false)
+  const [drumsVisible, setDrumsVisible] = useState(false)
   const { wavesurfer, isReady, isPlaying, currentTime } = useWavesurfer({
     container: containerRef,
     url: audioUrl,
@@ -67,6 +79,23 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
   useEffect(() => {
     if (wavesurfer && isReady) onReady?.(wavesurfer)
   }, [wavesurfer, isReady, onReady])
+
+  const duration = isReady && wavesurfer ? wavesurfer.getDuration() : 0
+
+  // Per-tick absorption tags, computed once per analysis: nearBass/nearDrums
+  // mark beats with a bass/drum onset within ABSORPTION_TOLERANCE_MS — the
+  // same distance rule Layer 3 applied inline, cached here so render-time
+  // suppression is a lookup gated on which stems are currently visible.
+  const tickTags = useMemo(() => {
+    if (!grid || !onsets || !duration) return null
+    const near = (onsetTimes: number[]) => {
+      const drawable = onsetTimes.filter((t) => t < duration)
+      return grid.beats.map((beat) =>
+        drawable.some((onset) => Math.abs(onset - beat) * 1000 < ABSORPTION_TOLERANCE_MS),
+      )
+    }
+    return { nearBass: near(onsets.bass), nearDrums: near(onsets.drums) }
+  }, [grid, onsets, duration])
 
   // The grid is drawn with wavesurfer's RegionsPlugin rather than a hand-rolled
   // overlay: the plugin positions every element as a percentage of wavesurfer's
@@ -101,24 +130,22 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
       styleRegion(region.element, { pointerEvents: 'none' })
     })
 
-    // Onset times (drums + bass) that suppress a nearby pulse tick — computed
-    // once up front so the beat loop below is a cheap lookup, not an O(n*m)
-    // rescan per beat.
-    const drumOnsets = onsets?.drums.filter(drawable) ?? []
-    const bassOnsets = onsets?.bass.filter(drawable) ?? []
-    const onsetTimes = [...drumOnsets, ...bassOnsets]
-    const isAbsorbed = (time: number) =>
-      onsetTimes.some((onset) => Math.abs(onset - time) * 1000 < ABSORPTION_TOLERANCE_MS)
+    // A tick is suppressed only when it's near an onset from a CURRENTLY
+    // VISIBLE stem (tags precomputed in tickTags with the Layer 3 rule).
+    // With both toggles off nothing is suppressed — every drawable tick
+    // renders; that full-grid baseline is intended.
+    const suppressed = (i: number) =>
+      tickTags !== null &&
+      ((bassVisible && tickTags.nearBass[i]) || (drumsVisible && tickTags.nearDrums[i]))
 
     // Pulse ticks at every beat, bottom-anchored like a ruler; downbeats (each
-    // bar's "1") are taller and darker. A tick within ABSORPTION_TOLERANCE_MS
-    // of a drum/bass onset is skipped — the onset marker below takes its
-    // place — and this applies to downbeats too, no special-casing.
+    // bar's "1") are taller and darker. A suppressed tick (downbeats included,
+    // no special-casing) is skipped — the onset marker takes its place.
     // pointerEvents none keeps wavesurfer's native click-to-seek working
     // through the grid.
     beats.forEach((time, i) => {
       if (!drawable(time)) return
-      if (isAbsorbed(time)) return
+      if (suppressed(i)) return
       const region = regions.addRegion({
         start: time,
         end: time,
@@ -138,36 +165,40 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
       })
     })
 
-    // Onset markers on top of the grid: bass is the tallest marker, drums
-    // shorter than bass but taller than a normal pulse tick. Independent
-    // layers — both render even if they land on the same suppressed tick,
-    // and coincident bass+drum onsets (kick+bass on a downbeat) both draw.
-    // Explicit z-index stacks bass over drums over pulse ticks.
-    drumOnsets.forEach((time) => {
-      const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
-      styleRegion(region.element, {
-        pointerEvents: 'none',
-        borderLeft: `${2 * ONSET_WIDTH_SCALE}px solid rgba(30, 90, 210, 0.9)`,
-        borderRadius: '0',
-        height: '45%',
-        top: '27.5%',
-        zIndex: '4',
+    // Onset markers on top of the grid, drawn only for visible stems: bass is
+    // the tallest marker, drums shorter than bass but taller than a normal
+    // pulse tick. Independent layers — both render even if they land on the
+    // same suppressed tick, and coincident bass+drum onsets (kick+bass on a
+    // downbeat) both draw. Explicit z-index stacks bass over drums over ticks.
+    if (drumsVisible && onsets) {
+      onsets.drums.filter(drawable).forEach((time) => {
+        const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
+        styleRegion(region.element, {
+          pointerEvents: 'none',
+          borderLeft: `${2 * ONSET_WIDTH_SCALE}px solid rgba(30, 90, 210, 0.9)`,
+          borderRadius: '0',
+          height: '45%',
+          top: '27.5%',
+          zIndex: '4',
+        })
       })
-    })
-    bassOnsets.forEach((time) => {
-      const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
-      styleRegion(region.element, {
-        pointerEvents: 'none',
-        borderLeft: `${3 * ONSET_WIDTH_SCALE}px solid rgba(210, 30, 30, 0.9)`,
-        borderRadius: '0',
-        height: '90%',
-        top: '5%',
-        zIndex: '5',
+    }
+    if (bassVisible && onsets) {
+      onsets.bass.filter(drawable).forEach((time) => {
+        const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
+        styleRegion(region.element, {
+          pointerEvents: 'none',
+          borderLeft: `${3 * ONSET_WIDTH_SCALE}px solid rgba(210, 30, 30, 0.9)`,
+          borderRadius: '0',
+          height: '90%',
+          top: '5%',
+          zIndex: '5',
+        })
       })
-    })
+    }
 
     return () => regions.destroy()
-  }, [wavesurfer, isReady, grid, onsets])
+  }, [wavesurfer, isReady, grid, onsets, tickTags, bassVisible, drumsVisible])
 
   // Zoomed slice: set wavesurfer's OWN zoom level so SLICE_EIGHT_COUNTS
   // eight-counts fill the container. Deriving the zoom level from musical
@@ -196,8 +227,6 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
     return () => observer.disconnect()
   }, [wavesurfer, isReady, grid])
 
-  const duration = isReady && wavesurfer ? wavesurfer.getDuration() : 0
-
   return (
     <div className="timeline">
       <div ref={containerRef} />
@@ -208,6 +237,22 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
         <span>
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
+        <button
+          onClick={() => setBassVisible((v) => !v)}
+          disabled={!onsets}
+          aria-pressed={bassVisible}
+          style={toggleStyle(bassVisible, 'rgba(210, 30, 30, 0.9)')}
+        >
+          Bass
+        </button>
+        <button
+          onClick={() => setDrumsVisible((v) => !v)}
+          disabled={!onsets}
+          aria-pressed={drumsVisible}
+          style={toggleStyle(drumsVisible, 'rgba(30, 90, 210, 0.9)')}
+        >
+          Drums
+        </button>
       </div>
     </div>
   )
