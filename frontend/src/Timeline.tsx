@@ -37,10 +37,10 @@ const ABSORPTION_TOLERANCE_MS = 60
 // is musical, not temporal — on-screen seconds vary with tempo by design.
 const SLICE_EIGHT_COUNTS = 2
 
-// Onset markers draw at this fraction of their Layer-3 widths so dense
-// passages read as distinct thin lines. Cosmetic only: no marker is removed
-// and no position changes.
-const ONSET_WIDTH_SCALE = 0.67
+// Scale factor on onset marker widths (1 = full width: 3px bass, 2px drums).
+// Kept as a knob for legibility tuning in dense passages; the thinned 0.67
+// variant read too faint, so markers render at full width.
+const ONSET_WIDTH_SCALE = 1
 
 function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
