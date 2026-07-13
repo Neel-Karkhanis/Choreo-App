@@ -13,7 +13,9 @@ TEST_AUDIO_PATH = "test_files/TBH.mp3"
 class TestDetectOnsetsDrums(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.onsets = detect_onsets(TEST_AUDIO_PATH, "drums")
+        cls.result = detect_onsets(TEST_AUDIO_PATH, "drums")
+        cls.onsets = cls.result["t"]
+        cls.strengths = cls.result["strength"]
 
     def test_returns_ndarray(self):
         self.assertIsInstance(self.onsets, np.ndarray)
@@ -31,16 +33,29 @@ class TestDetectOnsetsDrums(unittest.TestCase):
         self.assertTrue(np.all(self.onsets >= 0))
 
     def test_returns_seconds_not_frames(self):
-        # units='time' is in seconds. For a typical pop song the last onset
+        # Timestamps are in seconds. For a typical pop song the last onset
         # should be well under one hour but at least one second in.
         self.assertGreater(self.onsets[-1], 1.0)
         self.assertLess(self.onsets[-1], 3600.0)
+
+    def test_strengths_parallel_to_timestamps(self):
+        self.assertIsInstance(self.strengths, np.ndarray)
+        self.assertEqual(self.strengths.shape, self.onsets.shape)
+
+    def test_strengths_finite_and_nonnegative(self):
+        self.assertTrue(np.all(np.isfinite(self.strengths)))
+        self.assertTrue(np.all(self.strengths >= 0))
+        # Detected peaks sit above the envelope's moving average by delta,
+        # so at least some strengths must be strictly positive.
+        self.assertGreater(self.strengths.max(), 0)
 
 
 class TestDetectOnsetsBass(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.onsets = detect_onsets(TEST_AUDIO_PATH, "bass")
+        cls.result = detect_onsets(TEST_AUDIO_PATH, "bass")
+        cls.onsets = cls.result["t"]
+        cls.strengths = cls.result["strength"]
 
     def test_returns_ndarray(self):
         self.assertIsInstance(self.onsets, np.ndarray)
@@ -56,6 +71,15 @@ class TestDetectOnsetsBass(unittest.TestCase):
 
     def test_returns_nonnegative_timestamps(self):
         self.assertTrue(np.all(self.onsets >= 0))
+
+    def test_strengths_parallel_to_timestamps(self):
+        self.assertIsInstance(self.strengths, np.ndarray)
+        self.assertEqual(self.strengths.shape, self.onsets.shape)
+
+    def test_strengths_finite_and_nonnegative(self):
+        self.assertTrue(np.all(np.isfinite(self.strengths)))
+        self.assertTrue(np.all(self.strengths >= 0))
+        self.assertGreater(self.strengths.max(), 0)
 
 
 class TestDetectOnsetsValidation(unittest.TestCase):

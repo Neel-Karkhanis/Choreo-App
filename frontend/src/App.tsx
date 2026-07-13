@@ -12,9 +12,17 @@ interface Stem {
   url: string
 }
 
-// Mirrors the analysis JSON contract (schema_version 2): downbeats and
+// Parallel arrays: t[i] is an onset timestamp in seconds, strength[i] the
+// onset-envelope value at that onset. strength is plumbed by schema v4 but
+// deliberately unused by the UI so far.
+interface StemOnsets {
+  t: number[]
+  strength: number[]
+}
+
+// Mirrors the analysis JSON contract (schema_version 4): downbeats and
 // eight_counts are integer indices into beats, not timestamps. onsets.drums
-// and onsets.bass are plain timestamp lists, independent of the beat grid.
+// and onsets.bass are timestamp/strength pairs, independent of the beat grid.
 interface Analysis {
   id: string
   filename: string
@@ -24,7 +32,7 @@ interface Analysis {
   beats: number[]
   downbeats: number[]
   eight_counts: number[]
-  onsets: { drums: number[]; bass: number[] }
+  onsets: { drums: StemOnsets; bass: StemOnsets }
   audio_url: string
   stems: Stem[]
 }
@@ -53,12 +61,18 @@ function gridFromAnalysis(a: Analysis): { grid?: GridData; gridError?: string } 
 }
 
 // Onsets are independent of the beat grid, so validation failures here
-// shouldn't block the grid from rendering — reported separately.
+// shouldn't block the grid from rendering — reported separately. Only the
+// timestamps flow to the Timeline; strength is contract-checked but unused.
 function onsetsFromAnalysis(a: Analysis): { onsets?: OnsetData; onsetsError?: string } {
-  if (!a.onsets || !isNumbers(a.onsets.drums) || !isNumbers(a.onsets.bass)) {
-    return { onsetsError: 'analysis.onsets is not { drums: number[], bass: number[] }' }
+  const isStemOnsets = (s: StemOnsets | undefined) =>
+    !!s && isNumbers(s.t) && isNumbers(s.strength) && s.t.length === s.strength.length
+  if (!a.onsets || !isStemOnsets(a.onsets.drums) || !isStemOnsets(a.onsets.bass)) {
+    return {
+      onsetsError:
+        'analysis.onsets is not { drums|bass: { t: number[], strength: number[] } }',
+    }
   }
-  return { onsets: { drums: a.onsets.drums, bass: a.onsets.bass } }
+  return { onsets: { drums: a.onsets.drums.t, bass: a.onsets.bass.t } }
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

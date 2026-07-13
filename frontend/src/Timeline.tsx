@@ -33,6 +33,15 @@ interface TimelineProps {
 // tune against a real track if it reads too aggressive or too loose.
 const ABSORPTION_TOLERANCE_MS = 60
 
+// Zoomed slice: the visible window spans this many eight-counts. The window
+// is musical, not temporal — on-screen seconds vary with tempo by design.
+const SLICE_EIGHT_COUNTS = 2
+
+// Onset markers draw at this fraction of their Layer-3 widths so dense
+// passages read as distinct thin lines. Cosmetic only: no marker is removed
+// and no position changes.
+const ONSET_WIDTH_SCALE = 0.67
+
 function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = Math.floor(totalSeconds % 60)
@@ -49,6 +58,10 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
     container: containerRef,
     url: audioUrl,
     height: 96,
+    // Playback follow in the zoomed slice uses wavesurfer's own scrolling —
+    // never a hand-rolled scroll transform (single time↔pixel authority).
+    autoScroll: true,
+    autoCenter: true,
   })
 
   useEffect(() => {
@@ -121,35 +134,67 @@ function Timeline({ audioUrl, grid, onsets, onReady }: TimelineProps) {
         borderRadius: '0',
         height: emphasized ? '55%' : '25%',
         top: emphasized ? '45%' : '75%',
+        zIndex: '3',
       })
     })
 
     // Onset markers on top of the grid: bass is the tallest marker, drums
     // shorter than bass but taller than a normal pulse tick. Independent
-    // layers — both render even if they land on the same suppressed tick.
-    bassOnsets.forEach((time) => {
-      const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
-      styleRegion(region.element, {
-        pointerEvents: 'none',
-        borderLeft: '3px solid rgba(210, 30, 30, 0.9)',
-        borderRadius: '0',
-        height: '90%',
-        top: '5%',
-      })
-    })
+    // layers — both render even if they land on the same suppressed tick,
+    // and coincident bass+drum onsets (kick+bass on a downbeat) both draw.
+    // Explicit z-index stacks bass over drums over pulse ticks.
     drumOnsets.forEach((time) => {
       const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
       styleRegion(region.element, {
         pointerEvents: 'none',
-        borderLeft: '2px solid rgba(30, 90, 210, 0.9)',
+        borderLeft: `${2 * ONSET_WIDTH_SCALE}px solid rgba(30, 90, 210, 0.9)`,
         borderRadius: '0',
         height: '45%',
         top: '27.5%',
+        zIndex: '4',
+      })
+    })
+    bassOnsets.forEach((time) => {
+      const region = regions.addRegion({ start: time, end: time, drag: false, resize: false })
+      styleRegion(region.element, {
+        pointerEvents: 'none',
+        borderLeft: `${3 * ONSET_WIDTH_SCALE}px solid rgba(210, 30, 30, 0.9)`,
+        borderRadius: '0',
+        height: '90%',
+        top: '5%',
+        zIndex: '5',
       })
     })
 
     return () => regions.destroy()
   }, [wavesurfer, isReady, grid, onsets])
+
+  // Zoomed slice: set wavesurfer's OWN zoom level so SLICE_EIGHT_COUNTS
+  // eight-counts fill the container. Deriving the zoom level from musical
+  // duration is fine — it only configures wavesurfer's pxPerSec, after which
+  // wavesurfer stays the sole authority for every position. The median span
+  // between consecutive eight-count starts absorbs tempo drift (spans between
+  // starts are always full groups; only the segment after the last start can
+  // be partial, and it isn't a span).
+  useEffect(() => {
+    if (!wavesurfer || !isReady || !grid) return
+    const { beats, eightCountIndices } = grid
+    const starts = eightCountIndices.map((i) => beats[i])
+    if (starts.length < 2) return // too little structure to size a slice; keep full-song view
+    const spans = starts.slice(1).map((t, n) => t - starts[n])
+    const median = spans.sort((a, b) => a - b)[Math.floor(spans.length / 2)]
+    if (!(median > 0)) return
+    const applyZoom = () => {
+      const width = containerRef.current?.clientWidth
+      if (width) wavesurfer.zoom(width / (SLICE_EIGHT_COUNTS * median))
+    }
+    applyZoom()
+    // Re-derive the zoom level when the container resizes so the slice stays
+    // SLICE_EIGHT_COUNTS wide; wavesurfer re-renders and repositions markers.
+    const observer = new ResizeObserver(applyZoom)
+    if (containerRef.current) observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [wavesurfer, isReady, grid])
 
   const duration = isReady && wavesurfer ? wavesurfer.getDuration() : 0
 

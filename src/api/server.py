@@ -48,7 +48,7 @@ STEM_NAMES = ("vocals", "drums", "bass", "other", "instrumental")
 
 # Bump when the analysis JSON shape changes; cached analysis.json files with
 # a different version are discarded and recomputed (stems stay cached).
-ANALYSIS_SCHEMA_VERSION = 3
+ANALYSIS_SCHEMA_VERSION = 4
 
 app = FastAPI(title="Choreo API")
 
@@ -102,6 +102,14 @@ def _beat_index(beats, timestamp, label):
     return int(matches[0])
 
 
+def _onset_payload(onsets):
+    """Serialize detect_onsets output as parallel t/strength lists."""
+    return {
+        "t": [round(float(t), 3) for t in onsets["t"]],
+        "strength": [round(float(s), 4) for s in onsets["strength"]],
+    }
+
+
 def _analyze(audio_file):
     """Run the full analysis pipeline for one track.
 
@@ -114,9 +122,11 @@ def _analyze(audio_file):
     index may start a partial group (fewer than 8 beats before the track
     ends); its extent is up to the next index, or the end of beats.
 
-    `onsets.drums` and `onsets.bass` are independent of the beat grid: plain
-    timestamp lists from onset detection on the separated stems, not indices,
-    and not guaranteed to land on a beat.
+    `onsets.drums` and `onsets.bass` are independent of the beat grid: each
+    carries parallel lists `t` (timestamps in seconds, not indices, not
+    guaranteed to land on a beat) and `strength` (onset-envelope value at
+    that onset). Strength is plumbed by schema v4 for future use and is not
+    consumed by the frontend yet.
     """
     # Lazy imports: beat_detection loads the beat_this model at import time,
     # so the server boots fast and pays that cost on the first analysis.
@@ -148,8 +158,8 @@ def _analyze(audio_file):
             _beat_index(beats, group[0][0], "eight-count start") for group in groups
         ],
         "onsets": {
-            "drums": [round(float(t), 3) for t in drum_onsets],
-            "bass": [round(float(t), 3) for t in bass_onsets],
+            "drums": _onset_payload(drum_onsets),
+            "bass": _onset_payload(bass_onsets),
         },
     }
 

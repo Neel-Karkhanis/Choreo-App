@@ -27,13 +27,15 @@ ONSET_PARAMS = {
 
 
 def detect_onsets(stem_path, stem_type):
-    """Detect onset timestamps for a single separated stem.
+    """Detect onset timestamps and strengths for a single separated stem.
 
     Loads the audio at ``stem_path`` and runs ``librosa.onset.onset_detect``
     with parameters tuned for ``stem_type`` (see ``ONSET_PARAMS``). For the
     ``"bass"`` stem a custom mel-spectrogram-based onset envelope aggregated
     by median is used, which yields cleaner onsets on low-frequency content;
-    other stems use librosa's default envelope.
+    other stems use librosa's default envelope. The envelope is computed
+    explicitly (identical to what ``onset_detect`` would build internally)
+    so each onset's strength can be sampled at its detected frame.
 
     Args:
         stem_path: Path to the stem audio file (e.g. ``drums.wav``).
@@ -41,7 +43,11 @@ def detect_onsets(stem_path, stem_type):
             ``ONSET_PARAMS`` (currently ``"drums"`` or ``"bass"``).
 
     Returns:
-        A 1-D numpy array of onset timestamps in seconds, sorted ascending.
+        A dict of two parallel 1-D numpy arrays:
+            - ``"t"``: onset timestamps in seconds, sorted ascending.
+            - ``"strength"``: the onset-strength envelope sampled at each
+              onset's frame — raw (un-normalized) values from the same
+              envelope peak-picking ran on.
 
     Raises:
         TypeError: If stem_path or stem_type is not a string.
@@ -65,16 +71,22 @@ def detect_onsets(stem_path, stem_type):
 
     data, sr = librosa.load(stem_path, sr=None)
     params = ONSET_PARAMS[stem_type]
+    hop_length = params['hop_length']
 
     if stem_type == 'bass':
         # use a custom onset envelope based on log-energy difference
         onset_env = librosa.onset.onset_strength(
-            y=data, sr=sr,
+            y=data, sr=sr, hop_length=hop_length,
             feature=librosa.feature.melspectrogram,
             aggregate=np.median
         )
-        return librosa.onset.onset_detect(
-            onset_envelope=onset_env, sr=sr, units='time', **params
-        )
+    else:
+        onset_env = librosa.onset.onset_strength(y=data, sr=sr, hop_length=hop_length)
 
-    return librosa.onset.onset_detect(y=data, sr=sr, units='time', **params)
+    frames = librosa.onset.onset_detect(
+        onset_envelope=onset_env, sr=sr, units='frames', **params
+    )
+    return {
+        "t": librosa.frames_to_time(frames, sr=sr, hop_length=hop_length),
+        "strength": onset_env[frames],
+    }

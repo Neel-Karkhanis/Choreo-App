@@ -29,7 +29,8 @@ def analyze_audio(file_path, subdivisions=1):
               ``(timestamp, is_beat)`` tuples.
             - ``subdivisions``: The subdivisions value used.
             - ``onsets``: Dict with ``"drums"`` and ``"bass"`` keys, each
-              mapping to a list of onset timestamps in seconds.
+              a dict of parallel lists ``t`` (onset timestamps in seconds)
+              and ``strength`` (onset-envelope value at that onset).
             - ``existing_bookmarks``: Dict of saved bookmarks for this file,
               empty if none exist."""
 
@@ -59,8 +60,8 @@ def analyze_audio(file_path, subdivisions=1):
         "grouped_counts": grouped_counts,
         "subdivisions": subdivisions,
         "onsets": {
-            "drums": drum_onset.tolist(),
-            "bass": bass_onset.tolist(),
+            "drums": {"t": drum_onset["t"].tolist(), "strength": drum_onset["strength"].tolist()},
+            "bass": {"t": bass_onset["t"].tolist(), "strength": bass_onset["strength"].tolist()},
         },
         "existing_bookmarks": bookmarks,
     }
