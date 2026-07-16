@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type WaveSurfer from 'wavesurfer.js'
 import Timeline, { type GridData, type OnsetData } from './Timeline'
+import { loadStems, StemEngine } from './stemEngine'
 
 interface Track {
   id: string
@@ -87,6 +88,11 @@ function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The Web Audio stem engine — audio source AND clock authority for the
+  // whole timeline. Built eagerly per track (all five buffers decoded before
+  // playback is enabled); null while stems are still loading.
+  const [engine, setEngine] = useState<StemEngine | null>(null)
+  const [stemError, setStemError] = useState<string | null>(null)
   // Single source of truth for time↔pixel mapping; later layers (beat grid,
   // overlays) read duration/zoom/scroll from this instance.
   const [, setWavesurfer] = useState<WaveSurfer | null>(null)
@@ -127,6 +133,44 @@ function App() {
     }
   }, [selected])
 
+  // Eager stem load: all five buffers fetched and decoded through the single
+  // loadStems seam before the Timeline (and thus playback) exists. The abort
+  // + stale guard means a track switch — or StrictMode's dev double-mount —
+  // cancels the in-flight fetches and never constructs a stray engine.
+  useEffect(() => {
+    if (!analysis) return
+    let stale = false
+    const controller = new AbortController()
+    setEngine(null)
+    setStemError(null)
+    loadStems(analysis.id, controller.signal)
+      .then((buffers) => {
+        if (stale) return
+        const next = new StemEngine(buffers)
+        // Dev-only debug handle: lets driver scripts (and the later mobile
+        // memory profiling) assert engine internals — clock, gains, sources.
+        if (import.meta.env.DEV) {
+          ;(window as unknown as { __stemEngine?: StemEngine }).__stemEngine = next
+        }
+        setEngine(next)
+      })
+      .catch((err) => {
+        if (!stale && !controller.signal.aborted) setStemError(String(err))
+      })
+    return () => {
+      stale = true
+      controller.abort()
+    }
+  }, [analysis])
+
+  // The engine owns an AudioContext; close it when the engine is replaced or
+  // the app unmounts (separate effect so the loader above never races its own
+  // cleanup).
+  useEffect(() => {
+    if (!engine) return
+    return () => engine.destroy()
+  }, [engine])
+
   return (
     <main>
       <h1>Choreo</h1>
@@ -152,13 +196,22 @@ function App() {
           </p>
           {gridError && <p className="error">Beat grid unavailable: {gridError}</p>}
           {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
-          <Timeline
-            key={analysis.id}
-            audioUrl={analysis.audio_url}
-            grid={grid}
-            onsets={onsets}
-            onReady={setWavesurfer}
-          />
+          {stemError && <p className="error">Stems unavailable: {stemError}</p>}
+          {!engine && !stemError && (
+            <p>Loading stems… (decoding five buffers; sizes logged to console)</p>
+          )}
+          {engine && (
+            <Timeline
+              key={analysis.id}
+              engine={engine}
+              // The backend's bookmark sidecar is keyed by this exact id (the
+              // filename stem): tracks/<id>.bookmarks.json.
+              trackId={analysis.id}
+              grid={grid}
+              onsets={onsets}
+              onReady={setWavesurfer}
+            />
+          )}
         </section>
       )}
     </main>

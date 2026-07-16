@@ -7,6 +7,12 @@ import shutil
 
 EXPECTED_STEMS = ("drums.wav", "bass.wav", "vocals.wav", "other.wav")
 
+# Root of the per-file stem cache, relative to the process CWD (the repo root
+# in every real entry point). A single module-level binding — not an inline
+# literal — so the test suite can point it at a temp directory and never
+# touch the real cache the API server serves stems from.
+CACHE_ROOT = Path("cache/stems")
+
 def _hash_file(path):
     """Compute the MD5 hash of a file's contents.
 
@@ -36,9 +42,9 @@ def _is_cached(file_hash):
         file_hash: The MD5 hash returned by _hash_file().
 
     Returns:
-        True if cache/stems/<file_hash>/ contains all expected stems, else False.
+        True if CACHE_ROOT/<file_hash>/ contains all expected stems, else False.
     """
-    cache_dir = Path("cache/stems") / file_hash
+    cache_dir = CACHE_ROOT / file_hash
     if not cache_dir.exists():
         return False
 
@@ -76,7 +82,7 @@ def separate(audio_path):
         raise FileNotFoundError(f"File not found: {audio_path}")
 
     file_hash = _hash_file(audio_path)
-    cache_dir = Path("cache/stems") / file_hash 
+    cache_dir = CACHE_ROOT / file_hash
 
     if _is_cached(file_hash):
         stems = {}

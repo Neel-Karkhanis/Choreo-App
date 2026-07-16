@@ -12,6 +12,7 @@ or:
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,6 +41,9 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+import bookmark
 
 TRACKS_DIR = REPO_ROOT / "tracks"
 CACHE_DIR = REPO_ROOT / "cache" / "stems"
@@ -224,6 +228,81 @@ def get_stem(track_id, stem_name):
             detail="Stem not generated yet — request the track's analysis first",
         )
     return FileResponse(stem_file)
+
+
+class Bookmark(BaseModel):
+    """One bookmark record, matching src/bookmark.py's model exactly.
+
+    `timestamp` is stored VERBATIM — the server never snaps. The frontend
+    already holds beats/downbeats/eight_counts and snaps there, so a
+    "none"-mode bookmark carries a deliberately unsnapped time that
+    server-side snapping would corrupt. bookmark.snap_timestamp and
+    bookmark.add_bookmark are intentionally unused by this path.
+    """
+
+    id: str = Field(min_length=1)
+    timestamp: float = Field(ge=0)
+    label: str = ""
+    snap_mode: str
+
+    @property
+    def record(self):
+        return self.model_dump()
+
+
+class BookmarkSet(BaseModel):
+    """The full bookmark list for one track — the whole-set write unit.
+
+    PUT replaces every bookmark for the track in one shot, which matches the
+    sidecar-file model (one JSON per track, rewritten wholesale) and avoids
+    per-record read-modify-write races. Counts are small (tens).
+    """
+
+    bookmarks: list[Bookmark]
+
+
+def _bookmarks_response(bookmarks):
+    """Serialize the module's UUID-keyed dict as a timestamp-sorted list."""
+    return {"bookmarks": [record for _, record in bookmark.list_bookmarks(bookmarks)]}
+
+
+@app.get("/api/tracks/{track_id}/bookmarks")
+def get_bookmarks(track_id):
+    """All bookmarks for a track, sorted by timestamp.
+
+    The sidecar is keyed by the audio file itself (tracks/<id>.bookmarks.json),
+    and a track id IS the filename stem, so the id the frontend sends resolves
+    to exactly the file the sidecar sits beside. Absent sidecar -> empty list,
+    not a 404: a track with no bookmarks yet is normal, not an error.
+    """
+    audio_file = _track_file(track_id)
+    return _bookmarks_response(bookmark.load_bookmarks(str(audio_file)))
+
+
+@app.put("/api/tracks/{track_id}/bookmarks")
+def put_bookmarks(track_id, payload: BookmarkSet):
+    """Replace the full bookmark set for a track.
+
+    Times are written through unchanged; only the shape is validated. Duplicate
+    ids are rejected rather than silently collapsed by the dict — two bookmarks
+    on the same grid point are fine (distinct ids), two records claiming the
+    same id are not.
+    """
+    audio_file = _track_file(track_id)
+
+    for entry in payload.bookmarks:
+        if entry.snap_mode not in bookmark.VALID_SNAP_MODES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown snap_mode: {entry.snap_mode!r}",
+            )
+
+    records = {entry.id: entry.record for entry in payload.bookmarks}
+    if len(records) != len(payload.bookmarks):
+        raise HTTPException(status_code=422, detail="Duplicate bookmark id")
+
+    bookmark.save_bookmarks(records, str(audio_file))
+    return _bookmarks_response(records)
 
 
 if __name__ == "__main__":

@@ -16,9 +16,27 @@ li {
   color: crimson;
 }
 
+.timeline-minimap {
+  margin-top: 4px;
+  cursor: pointer;
+  /* Pointer-drag seeking owns horizontal gestures on touch devices. */
+  touch-action: none;
+}
+
 .timeline-controls {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   margin-top: 0.5rem;
+}
+
+.bookmark-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid;
+  border-radius: 4px;
+  font-size: 0.9rem;
 }

@@ -2,10 +2,12 @@ import unittest
 import os
 import sys
 import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+import source_separation
 from source_separation import (
     separate, get_stem, get_vocals, get_drums,
     get_bass, get_other, get_instrumental,
@@ -14,13 +16,33 @@ from source_separation import (
 
 TEST_AUDIO = "test_files/TBH.mp3"
 
+# ISOLATION: every cache write in this suite lands in a throwaway temp dir,
+# never in the real cache/stems/ tree. That tree is LIVE APP DATA — the API
+# server serves stems out of it, keyed by content hash, so a fixture whose
+# bytes match a real track would otherwise collide with (and this suite's
+# unlink/rmtree calls would destroy) data the running app depends on.
+_cache_tmp = None
+_original_cache_root = None
+
+
+def setUpModule():
+    global _cache_tmp, _original_cache_root
+    _cache_tmp = tempfile.TemporaryDirectory()
+    _original_cache_root = source_separation.CACHE_ROOT
+    source_separation.CACHE_ROOT = Path(_cache_tmp.name)
+
+
+def tearDownModule():
+    source_separation.CACHE_ROOT = _original_cache_root
+    _cache_tmp.cleanup()
+
 
 class TestSeparate(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.stems = separate(TEST_AUDIO)
         cls.file_hash = _hash_file(TEST_AUDIO)
-        cls.cache_dir = Path("cache/stems") / cls.file_hash
+        cls.cache_dir = source_separation.CACHE_ROOT / cls.file_hash
 
     def test_returns_dict(self):
         self.assertIsInstance(self.stems, dict)
@@ -65,7 +87,7 @@ class TestSeparateCaching(unittest.TestCase):
         # Prime the cache so the cache-hit path is exercised below.
         separate(TEST_AUDIO)
         cls.file_hash = _hash_file(TEST_AUDIO)
-        cls.cache_dir = Path("cache/stems") / cls.file_hash
+        cls.cache_dir = source_separation.CACHE_ROOT / cls.file_hash
 
     def test_cache_hit_skips_demucs(self):
         with patch("source_separation.demucs.separate.main") as mock_main:
@@ -80,7 +102,7 @@ class TestSeparateCaching(unittest.TestCase):
 
     def test_cache_miss_runs_demucs(self):
         missing_hash = "0" * 32
-        missing_dir = Path("cache/stems") / missing_hash
+        missing_dir = source_separation.CACHE_ROOT / missing_hash
         if missing_dir.exists():
             shutil.rmtree(missing_dir)
 
@@ -108,8 +130,8 @@ class TestHashFile(unittest.TestCase):
         self.assertEqual(_hash_file(TEST_AUDIO), _hash_file(TEST_AUDIO))
 
     def test_differs_for_different_content(self):
-        a = Path("cache") / "_hash_a.tmp"
-        b = Path("cache") / "_hash_b.tmp"
+        a = source_separation.CACHE_ROOT / "_hash_a.tmp"
+        b = source_separation.CACHE_ROOT / "_hash_b.tmp"
         a.parent.mkdir(parents=True, exist_ok=True)
         a.write_bytes(b"hello")
         b.write_bytes(b"world")
@@ -123,7 +145,7 @@ class TestHashFile(unittest.TestCase):
 class TestIsCached(unittest.TestCase):
     def setUp(self):
         self.fake_hash = "deadbeef" * 4
-        self.cache_dir = Path("cache/stems") / self.fake_hash
+        self.cache_dir = source_separation.CACHE_ROOT / self.fake_hash
         if self.cache_dir.exists():
             shutil.rmtree(self.cache_dir)
 
@@ -192,7 +214,7 @@ class TestGetInstrumental(unittest.TestCase):
     def setUpClass(cls):
         cls.stems = separate(TEST_AUDIO)
         cls.file_hash = _hash_file(TEST_AUDIO)
-        cls.cache_dir = Path("cache/stems") / cls.file_hash
+        cls.cache_dir = source_separation.CACHE_ROOT / cls.file_hash
         cls.expected_path = cls.cache_dir / "instrumental.wav"
 
     def setUp(self):
