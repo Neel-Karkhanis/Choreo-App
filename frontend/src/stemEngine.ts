@@ -1,4 +1,4 @@
-import { API_BASE } from './bookmarks'
+import { API_BASE } from './snap'
 
 // The Web Audio stem engine: the app's audio source AND clock authority.
 //
@@ -9,7 +9,7 @@ import { API_BASE } from './bookmarks'
 // only their gains move. audioContext.currentTime is the one clock; both
 // wavesurfer instances consume it through a minimal media-element shim
 // (engine.media), so every existing time→pixel consumer (playhead, grid
-// highlight, minimap viewport, bookmarks, loop) reads this clock unchanged.
+// highlight, minimap viewport, loop) reads this clock unchanged.
 //
 // Wavesurfer never decodes or fetches anything: both instances are created
 // with `media` + `peaks` + `duration` and no URL, which its v7 load path

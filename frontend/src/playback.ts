@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type WaveSurfer from 'wavesurfer.js'
-import type { SnapDirection } from './bookmarks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { SnapDirection } from './snap'
 import { PLAYBACK_RATE_MAX, PLAYBACK_RATE_MIN, type StemEngine } from './stemEngine'
 
 // Real-time, client-side playback behaviors: A/B loop and playback speed.
@@ -30,6 +29,102 @@ export const LOOP_MINIMAP_FILL = 'rgba(20, 150, 150, 0.2)'
 // will resume when you toggle it back on.
 export const LOOP_DISABLED_OPACITY = '0.4'
 
+/**
+ * Playhead + play/pause, read straight off the engine.
+ *
+ * THE reason this exists: transport used to be whatever `useWavesurfer`
+ * happened to report inside the Timeline, which made the Timeline the de facto
+ * owner of the clock. A second screen would then have had a second wavesurfer
+ * with a second copy of isPlaying/currentTime, and the two would have drifted
+ * on the first seek. Subscribing to the engine instead gives every screen the
+ * SAME numbers from the SAME clock, and leaves the wavesurfer instances as what
+ * they should be: renderers.
+ *
+ * The engine emits discrete edges only (play/pause/seeked/ended/timeupdate) —
+ * it deliberately does not stream a timeupdate per frame — so the position is
+ * polled on rAF while playing and read from the edges otherwise. That is the
+ * same shape wavesurfer's own 16ms ticker uses, for the same reason.
+ */
+export interface Transport {
+  isPlaying: boolean
+  currentTime: number
+  duration: number
+  play: () => void
+  pause: () => void
+  toggle: () => void
+  // Moves the shared clock. Both wavesurfer views follow via timeupdate — no
+  // view ever seeks another view.
+  seek: (time: number) => void
+}
+
+export function useEngineTransport(engine: StemEngine): Transport {
+  const [isPlaying, setIsPlaying] = useState(() => !engine.paused)
+  const [currentTime, setCurrentTime] = useState(() => engine.currentTime)
+
+  useEffect(() => {
+    const media = engine.media
+    const sync = () => setCurrentTime(engine.currentTime)
+    const onPlay = () => {
+      setIsPlaying(true)
+      sync()
+    }
+    const onStop = () => {
+      setIsPlaying(false)
+      sync()
+    }
+    // Adopt the engine's state on (re)subscribe rather than trusting the
+    // initializer: a new engine arrives mid-render and may already differ.
+    setIsPlaying(!engine.paused)
+    sync()
+    media.addEventListener('play', onPlay)
+    media.addEventListener('pause', onStop)
+    media.addEventListener('ended', onStop)
+    media.addEventListener('timeupdate', sync)
+    media.addEventListener('seeked', sync)
+    return () => {
+      media.removeEventListener('play', onPlay)
+      media.removeEventListener('pause', onStop)
+      media.removeEventListener('ended', onStop)
+      media.removeEventListener('timeupdate', sync)
+      media.removeEventListener('seeked', sync)
+    }
+  }, [engine])
+
+  // Poll the clock only while it is moving; a paused engine's position changes
+  // only on seek, which fires an edge.
+  useEffect(() => {
+    if (!isPlaying) return
+    let frame = 0
+    const tick = () => {
+      setCurrentTime(engine.currentTime)
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [engine, isPlaying])
+
+  const play = useCallback(() => void engine.play(), [engine])
+  const pause = useCallback(() => engine.pause(), [engine])
+  const toggle = useCallback(() => {
+    if (engine.paused) void engine.play()
+    else engine.pause()
+  }, [engine])
+  const seek = useCallback((time: number) => engine.seek(time), [engine])
+
+  return useMemo(
+    () => ({
+      isPlaying,
+      currentTime,
+      duration: engine.duration,
+      play,
+      pause,
+      toggle,
+      seek,
+    }),
+    [isPlaying, currentTime, engine, play, pause, toggle, seek],
+  )
+}
+
 export interface LoopController {
   start: number | null
   end: number | null
@@ -55,8 +150,8 @@ interface LoopRange {
  * A/B repeat over the live playhead.
  *
  * `snap` is injected rather than imported so the loop honors whatever snap mode
- * is currently selected — the same capability bookmarks use, but asked for a
- * DIRECTION: A floors, B ceils. A loop set in "none" mode keeps raw times.
+ * is currently selected, asked for a DIRECTION: A floors, B ceils. A loop set
+ * in "none" mode keeps raw times.
  *
  * ENFORCEMENT lives in the engine, not here: the committed region is pushed
  * into StemEngine.setLoop, which sets loop/loopStart/loopEnd NATIVELY on all
@@ -126,6 +221,19 @@ export function useLoop(
     [snap],
   )
 
+  // Re-commit the RAW endpoints whenever the snap function itself changes —
+  // which happens when the grid moves (a phase/count nudge, a re-tap, a tap
+  // preview updating) or the snap mode is switched. The raw times are the
+  // user's intent; the snapped endpoints are derived state, so they follow the
+  // grid. This is what makes a phase nudge audible while looping: A and B land
+  // on the corrected grid immediately, mid-loop, instead of keeping the stale
+  // offset until the user re-sets them.
+  useEffect(() => {
+    const { start, end } = rawRange.current
+    if (start === null && end === null) return
+    commit({ start, end })
+  }, [commit])
+
   const setLoop = useCallback((start: number, end: number) => commit({ start, end }), [commit])
   const setLoopStart = useCallback(
     (time: number) => commit({ start: time, end: rawRange.current.end }),
@@ -164,21 +272,22 @@ export interface SpeedController {
 /**
  * Live playback rate. Only wall-clock speed changes: the engine's clock still
  * advances in TRACK time (rate-aware, re-anchored on every change), so beats,
- * 8-counts, bookmarks, labels, and loop A/B — all defined in track time —
- * stay exactly where they are. Nothing in the timeline may assume
- * realtime == tracktime.
+ * 8-counts, and loop A/B — all defined in track time — stay exactly where
+ * they are. Nothing in the timeline may assume realtime == tracktime.
  *
- * The write goes through wavesurfer's setPlaybackRate -> media.playbackRate,
- * which the engine shim maps onto all five sources live: no rebuild, no
- * position jump — a rate change bends the playback slope, never the position.
+ * The write goes STRAIGHT to the engine, which maps it onto all five sources
+ * live: no rebuild, no position jump — a rate change bends the playback slope,
+ * never the position. It used to go through wavesurfer's setPlaybackRate,
+ * which only ever forwarded to media.playbackRate and so landed in exactly
+ * this same call; routing around it is what lets speed be owned above the
+ * screens, where no wavesurfer instance exists to forward through.
  */
-export function useSpeed(wavesurfer: WaveSurfer | null): SpeedController {
+export function useSpeed(engine: StemEngine): SpeedController {
   const [speed, setSpeedState] = useState(SPEED_DEFAULT)
 
   useEffect(() => {
-    if (!wavesurfer) return
-    wavesurfer.setPlaybackRate(speed)
-  }, [wavesurfer, speed])
+    engine.setPlaybackRate(speed)
+  }, [engine, speed])
 
   const setSpeed = useCallback((rate: number) => {
     setSpeedState(Math.min(Math.max(rate, SPEED_MIN), SPEED_MAX))

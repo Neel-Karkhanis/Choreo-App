@@ -1,17 +1,15 @@
 import source_separation
 import beat_detection
 import onset_detection
-import bookmark
 
 
 def analyze_audio(file_path, subdivisions=1):
     """Run the full audio analysis pipeline and return a serializable result.
 
     Separates the audio into stems via Demucs, detects beats and downbeats,
-    groups beats into eight-counts (optionally subdivided), runs onset
-    detection on the drums and bass stems, and loads any existing bookmarks
-    for the file. All numpy arrays are converted to plain Python lists so
-    the returned dict is directly JSON-serializable.
+    groups beats into eight-counts (optionally subdivided), and runs onset
+    detection on the drums and bass stems. All numpy arrays are converted to
+    plain Python lists so the returned dict is directly JSON-serializable.
 
     Args:
         file_path: Path to the audio file to analyze.
@@ -30,9 +28,7 @@ def analyze_audio(file_path, subdivisions=1):
             - ``subdivisions``: The subdivisions value used.
             - ``onsets``: Dict with ``"drums"`` and ``"bass"`` keys, each
               a dict of parallel lists ``t`` (onset timestamps in seconds)
-              and ``strength`` (onset-envelope value at that onset).
-            - ``existing_bookmarks``: Dict of saved bookmarks for this file,
-              empty if none exist."""
+              and ``strength`` (onset-envelope value at that onset)."""
 
     # audio separation
     stems = source_separation.separate(file_path)
@@ -48,9 +44,6 @@ def analyze_audio(file_path, subdivisions=1):
     drum_onset = onset_detection.detect_onsets(drums_path, 'drums')
     bass_onset = onset_detection.detect_onsets(bass_path, 'bass')
 
-    # bookmark dictionary
-    bookmarks = bookmark.load_bookmarks(file_path)
-
     api = {
         "audio_path": file_path,
         "stems": stems,
@@ -63,7 +56,6 @@ def analyze_audio(file_path, subdivisions=1):
             "drums": {"t": drum_onset["t"].tolist(), "strength": drum_onset["strength"].tolist()},
             "bass": {"t": bass_onset["t"].tolist(), "strength": bass_onset["strength"].tolist()},
         },
-        "existing_bookmarks": bookmarks,
     }
 
     return api

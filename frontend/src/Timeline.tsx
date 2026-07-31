@@ -1,63 +1,62 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWavesurfer } from '@wavesurfer/react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin, { type Region } from 'wavesurfer.js/plugins/regions'
-import {
-  DEFAULT_SNAP_MODE,
-  SNAP_MODES,
-  snapTime,
-  useBookmarks,
-  type Bookmark,
-  type SnapDirection,
-  type SnapMode,
-} from './bookmarks'
+import { LoopControls, PlayPauseButton, SpeedControl, TimeReadout } from './controls'
+import { toggleStyle } from './styles'
+import { findEightCountIndex, type EightCountWindow } from './eightCount'
+import { SNAP_MODES, type SnapMode } from './snap'
 import {
   LOOP_BAND_EDGE,
   LOOP_BAND_EDGE_WIDTH,
   LOOP_BAND_FILL,
   LOOP_DISABLED_OPACITY,
   LOOP_MINIMAP_FILL,
-  SPEED_DEFAULT,
-  SPEED_MAX,
-  SPEED_MIN,
-  SPEED_STEP,
-  useLoop,
-  useSpeed,
+  type LoopController,
+  type SpeedController,
+  type Transport,
 } from './playback'
-import {
-  DEFAULT_STEM_MODE,
-  STEM_MODES,
-  type StemEngine,
-  type StemMode,
-} from './stemEngine'
+import { DEFAULT_STEM_MODE, STEM_MODES, type StemEngine, type StemMode } from './stemEngine'
+import { PHASE_NUDGE_MS } from './tapGrid'
+import type { TapSession } from './tapSession'
+import type { GridData, OnsetData } from './types'
+import TapOverlay from './TapOverlay'
 
-// Beat-grid data, already validated by the caller. downbeatIndices and
-// eightCountIndices are indices into beats (schema v2), not timestamps.
-export interface GridData {
-  beats: number[]
-  downbeatIndices: number[]
-  eightCountIndices: number[]
-}
-
-// Onset data, already validated by the caller. Plain timestamps in seconds,
-// independent of the beat grid — not indices, not guaranteed to land on a beat.
-export interface OnsetData {
-  drums: number[]
-  bass: number[]
-}
+// Re-exported for the modules that still name these through the Timeline.
+// They are defined in types.ts now: the shell owns them, not this screen.
+export type { GridData, OnsetData } from './types'
 
 interface TimelineProps {
   // The fully-loaded stem engine: audio source, clock authority, and peaks
   // provider. The Timeline never fetches or decodes audio itself — both
   // wavesurfer instances are views over this engine's shim + peak data.
   engine: StemEngine
-  // The track's id — the filename stem. This is exactly the key the backend's
-  // bookmark sidecar is named after (tracks/<id>.bookmarks.json), so it must
-  // be passed through verbatim or bookmarks save and load under different keys.
-  trackId: string
+  // ALL of the state below is owned by the Song shell above this screen. This
+  // component is a VIEW: it renders that state and calls back into it. It
+  // deliberately holds no transport, loop, speed, snap, stem-mode, or grid
+  // state of its own, so swapping to another screen and back cannot lose or
+  // fork any of it.
+  transport: Transport
+  loop: LoopController
+  speed: SpeedController
+  duration: number
+  // THE grid to draw: the tap preview when a session is open, the saved grid
+  // otherwise, undefined when neither exists. Nothing below this line knows a
+  // grid can be tapped.
   grid?: GridData
+  // Whether a PERSISTED grid exists — distinct from `grid`, which may be a
+  // preview. Gates the re-tap and nudge controls, which act on the saved grid.
+  hasSavedGrid: boolean
+  windows: EightCountWindow[] | null
   onsets?: OnsetData
+  snapMode: SnapMode
+  onSnapModeChange: (mode: SnapMode) => void
+  stemMode: StemMode
+  onStemModeChange: (mode: StemMode) => void
+  tap: TapSession
+  // Slide the SAVED grid's phase, or re-label its counts. Owned above so the
+  // write goes through the same persistence path as an accepted tap.
+  onNudgeGrid: (deltaMs: number, deltaCount: number) => void
   // Later layers (subdivisions, onset overlays) must position themselves via
   // this instance's own time↔pixel mapping — never independent coordinate math.
   onReady?: (wavesurfer: WaveSurfer) => void
@@ -97,32 +96,6 @@ const MINIMAP_PLAYHEAD_WIDTH = 2
 const VIEWPORT_BOX_FILL = 'rgba(40, 40, 40, 0.07)'
 const VIEWPORT_BOX_BORDER = '1px solid rgba(40, 40, 40, 0.7)'
 
-// Bookmarks are user-authored, so they get their own hue: brown. Deliberately
-// distinct from drums-blue, bass-red, and the Layer 6 yellow highlight.
-const BOOKMARK_HUE = 'rgb(124, 74, 32)'
-const BOOKMARK_SELECTED_HUE = 'rgb(196, 118, 51)'
-// Main (detail) view glyph: a full-height stem with a tappable diamond at the
-// bottom edge — clear of the Layer 6 count labels along the top edge.
-const BOOKMARK_STEM_WIDTH = 2
-const BOOKMARK_GLYPH_SIZE = 12
-const BOOKMARK_GLYPH_SHAPE = 'rotate(45deg)' // square rotated into a diamond
-// Minimap tick: a plain full-height line, tappable to seek.
-const BOOKMARK_TICK_WIDTH = 2
-// A long note would run across neighbouring beats, so the on-timeline text is
-// cut to this many characters. Display only — the full label is what's stored,
-// what the tooltip shows, and what the info panel edits.
-const BOOKMARK_LABEL_MAX_CHARS = 5
-// The user's typed label, drawn beside the glyph on the main view. Sits on the
-// bottom edge, clear of the Layer 6 count labels along the top.
-const BOOKMARK_LABEL_STYLE: Partial<CSSStyleDeclaration> = {
-  fontSize: '11px',
-  lineHeight: '1',
-  fontWeight: '600',
-  // White halo keeps the label legible over waveform peaks, same trick the
-  // Layer 6 count numbers use.
-  textShadow: '0 0 3px rgba(255, 255, 255, 0.9), 0 0 1px rgba(255, 255, 255, 0.9)',
-}
-
 // Count-number styling: top edge of the block, nudged right of the beat line
 // so the digit clears the (up to 3px wide) onset markers on the beat itself.
 // Pulse ticks are bottom-anchored, so there's no vertical collision either.
@@ -160,6 +133,13 @@ const SUBDIVISION_LABEL_STYLE: Partial<CSSStyleDeclaration> = {
   textShadow: '0 0 3px rgba(255, 255, 255, 0.9), 0 0 1px rgba(255, 255, 255, 0.9)',
 }
 
+// Tap markers: where the user's taps landed, in a hue used nowhere else
+// (green — clear of drums-blue, bass-red, the Layer 6 yellow, and the loop's
+// teal). Full height and above every grid layer, because while tapping these
+// ARE the subject.
+const TAP_MARKER_COLOR = 'rgba(20, 150, 60, 0.9)'
+const TAP_MARKER_WIDTH = 2
+
 // Stem mode selector (PROVISIONAL UI — see the JSX comment at the render
 // site). Active mode fills dark, distinct from the red/blue onset toggles.
 const STEM_MODE_LABELS: Record<StemMode, string> = {
@@ -171,12 +151,6 @@ const STEM_MODE_LABELS: Record<StemMode, string> = {
 }
 const STEM_MODE_ACTIVE_COLOR = 'rgba(40, 40, 40, 0.9)'
 
-function formatTime(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = Math.floor(totalSeconds % 60)
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
-}
-
 function styleRegion(el: HTMLElement | null, styles: Partial<CSSStyleDeclaration>) {
   if (el) Object.assign(el.style, styles)
 }
@@ -184,10 +158,10 @@ function styleRegion(el: HTMLElement | null, styles: Partial<CSSStyleDeclaration
 // Layer 2's 8-count shading builder, shared verbatim by the main view and the
 // minimap: regions are TIME-defined, so the same definitions render at any
 // px-per-sec with no pixel recomputation. Alternate groups are shaded; the
-// last group may be partial (schema v2) and runs to the end of the track.
-// Times at/past duration are skipped (beat_this can emit a final beat there).
-// pointerEvents none so shades never swallow clicks — wavesurfer's native
-// click-to-seek on the main view, the seek handler on the minimap.
+// last group may be partial and runs to the end of the track. Times at/past
+// duration are skipped (gridFromFit's 3dp rounding can land the final beat
+// there). pointerEvents none so shades never swallow clicks — wavesurfer's
+// native click-to-seek on the main view, the seek handler on the minimap.
 function addEightCountShading(
   regions: RegionsPlugin,
   grid: GridData,
@@ -212,63 +186,26 @@ function addEightCountShading(
   return added
 }
 
-// Cut a bookmark's note down to BOOKMARK_LABEL_MAX_CHARS for the timeline
-// glyph, with an ellipsis when there's more. Purely visual: the untruncated
-// label stays on the record, in the glyph's tooltip, and in the edit field.
-// A trailing space in the cut would render as a gap before the ellipsis.
-function truncateLabel(label: string): string {
-  if (label.length <= BOOKMARK_LABEL_MAX_CHARS) return label
-  return `${label.slice(0, BOOKMARK_LABEL_MAX_CHARS).trimEnd()}…`
-}
-
-// One 8-count group as a time window. firstBeat indexes into beats; the k-th
-// window spans [beats[ec[k]], beats[ec[k+1]]), and the last window runs to
-// the track end and may hold fewer than 8 beats (ragged final group).
-interface EightCountWindow {
-  firstBeat: number
-  beatCount: number
-  start: number
-  end: number
-}
-
-// Binary search for the window containing `time`; null before the first
-// window (pickup beats precede the first downbeat, so beats[0] can sit
-// outside every group) or at/past the end of the last.
-function findEightCountIndex(windows: EightCountWindow[], time: number): number | null {
-  let lo = 0
-  let hi = windows.length - 1
-  let candidate = -1
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    if (windows[mid].start <= time) {
-      candidate = mid
-      lo = mid + 1
-    } else {
-      hi = mid - 1
-    }
-  }
-  return candidate >= 0 && time < windows[candidate].end ? candidate : null
-}
-
-// Onset toggle buttons: active fills with the stem's marker color, inactive is
-// the plain default button. Placeholder styling — a later design pass owns
-// polish; only the active/inactive distinction matters here.
-function toggleStyle(active: boolean, color: string): CSSProperties {
-  return active ? { backgroundColor: color, borderColor: color, color: 'white' } : {}
-}
-
-function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
+function Timeline({
+  engine,
+  transport,
+  loop,
+  speed,
+  duration,
+  grid,
+  hasSavedGrid,
+  windows,
+  onsets,
+  snapMode,
+  onSnapModeChange,
+  stemMode,
+  onStemModeChange,
+  tap,
+  onNudgeGrid,
+  onReady,
+}: TimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const minimapRef = useRef<HTMLDivElement>(null)
-  // Snap mode applies to the NEXT bookmark created (and to any shift) — it
-  // never re-snaps bookmarks already placed.
-  const [snapMode, setSnapMode] = useState<SnapMode>(DEFAULT_SNAP_MODE)
-  const [selectedBookmarkId, setSelectedBookmarkId] = useState<string | null>(null)
-  const bookmarkStore = useBookmarks(trackId)
-  // Which stems are audible (and which waveform renders). Pure engine state:
-  // switching mode ramps five gains and swaps waveform pixels — it must never
-  // touch the grid, overlays, bookmarks, or the loop (all track properties).
-  const [stemMode, setStemMode] = useState<StemMode>(DEFAULT_STEM_MODE)
   // Mirror for effects that need the CURRENT mode without re-running on mode
   // changes (the minimap is created once; its later re-skins come from the
   // mode effect, not from re-creation).
@@ -280,6 +217,8 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
   const [minimapRegions, setMinimapRegions] = useState<RegionsPlugin | null>(null)
   // Session-only visibility toggles for the onset overlays; both start off,
   // so the baseline view is pulse ticks + 8-count shading with no markers.
+  // These are the one kind of state this screen legitimately owns: they change
+  // nothing about the song, only what this view draws.
   const [bassVisible, setBassVisible] = useState(false)
   const [drumsVisible, setDrumsVisible] = useState(false)
   // Which 8-count window the playhead is in (null = outside every window),
@@ -287,7 +226,7 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
   // regions to the SAME plugin — one coordinate space, one paint layer.
   const [currentEightCountIndex, setCurrentEightCountIndex] = useState<number | null>(null)
   const [gridRegions, setGridRegions] = useState<RegionsPlugin | null>(null)
-  const { wavesurfer, isPlaying, currentTime } = useWavesurfer({
+  const { wavesurfer } = useWavesurfer({
     container: containerRef,
     // NO url and NO HTMLAudioElement — the engine's media shim is the clock,
     // and precomputed peaks + duration put wavesurfer on its render-without-
@@ -327,37 +266,6 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
   useEffect(() => {
     if (wavesurfer && isReady) onReady?.(wavesurfer)
   }, [wavesurfer, isReady, onReady])
-
-  // Duration is CAPTURED ONCE, when wavesurfer reports ready — never re-read on
-  // each render. The browser refines an MP3's media.duration after it has fully
-  // parsed the file (seeking to the end triggers exactly that), and reading it
-  // per render turned that refinement into a duration CHANGE. That rippled into
-  // the memos the grid effect depends on, so the grid effect tore its
-  // RegionsPlugin down and built a new one — while, in the same commit, every
-  // effect that also depends on duration (the active-block labels, the bookmark
-  // glyphs, the loop band) re-ran still holding the OLD, destroyed plugin and
-  // called addRegion on it: "WaveSurfer is not initialized", and the whole app
-  // unmounted. Freezing duration keeps the grid stable; a sub-millisecond
-  // correction to the track length is worth nothing next to that.
-  const [duration, setDuration] = useState(0)
-  useEffect(() => {
-    if (!wavesurfer || !isReady) return
-    setDuration(wavesurfer.getDuration())
-  }, [wavesurfer, isReady])
-
-  // Loop points snap through the SAME capability bookmarks use, honoring the
-  // snap mode selected right now — but DIRECTIONALLY (the loop floors A and
-  // ceils B so it encloses whole musical units, where a bookmark takes the
-  // nearest grid line). In "none" mode both keep the raw playhead time.
-  const snapToMode = useCallback(
-    (time: number, direction: SnapDirection) =>
-      snapTime(time, snapMode, grid, duration, direction),
-    [snapMode, grid, duration],
-  )
-  // The loop drives the ENGINE (native buffer-source looping); speed drives
-  // the shared shim through wavesurfer. Same clock either way.
-  const loop = useLoop(engine, snapToMode)
-  const { speed, setSpeed, resetSpeed } = useSpeed(wavesurfer)
 
   // Per-tick absorption tags, computed once per analysis: nearBass/nearDrums
   // mark beats with a bass/drum onset within ABSORPTION_TOLERANCE_MS — the
@@ -400,25 +308,10 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
     return midpoints
   }, [grid, duration])
 
-  // 8-count windows for active-block tracking, derived once per analysis.
-  const eightCountWindows = useMemo(() => {
-    if (!grid || !duration) return null
-    const { beats, eightCountIndices } = grid
-    return eightCountIndices.map((firstBeat, k): EightCountWindow => {
-      const nextFirst = eightCountIndices[k + 1]
-      return {
-        firstBeat,
-        beatCount: (nextFirst ?? beats.length) - firstBeat,
-        start: beats[firstBeat],
-        end: nextFirst !== undefined ? beats[nextFirst] : duration,
-      }
-    })
-  }, [grid, duration])
-
   // The RegionsPlugin is created ONCE per wavesurfer instance and outlives every
   // layer drawn into it. It deliberately does NOT get torn down when the grid
-  // re-renders: every layer (grid, active-block labels, bookmarks, loop band)
-  // adds regions to this one plugin, and several of them re-run on the same
+  // re-renders: every layer (grid, active-block labels, loop band) adds
+  // regions to this one plugin, and several of them re-run on the same
   // dependency (duration). If a grid re-render destroyed and replaced the
   // plugin, those other effects would re-run in the SAME commit still holding
   // the old, destroyed instance — React has not flushed the new one into state
@@ -433,6 +326,36 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
       regions.destroy()
     }
   }, [wavesurfer, isReady])
+
+  // Tap markers: the one thing that IS live per tap. One region each, so the
+  // per-tap cost stays flat no matter how long the grid is.
+  useEffect(() => {
+    if (!gridRegions || !duration || !tap.tapping) return
+    const added: Region[] = []
+    tap.taps.forEach((time) => {
+      if (!(time < duration)) return
+      const region = gridRegions.addRegion({
+        start: time,
+        end: time,
+        drag: false,
+        resize: false,
+      })
+      styleRegion(region.element, {
+        pointerEvents: 'none',
+        borderLeft: `${TAP_MARKER_WIDTH}px solid ${TAP_MARKER_COLOR}`,
+        borderRadius: '0',
+        height: '100%',
+        top: '0',
+        zIndex: '7', // above every grid layer: while tapping, these are the subject
+      })
+      added.push(region)
+    })
+    return () => {
+      added.forEach((region) => {
+        if (!region.isRemoved) region.remove()
+      })
+    }
+  }, [gridRegions, duration, tap.taps, tap.tapping])
 
   // The grid is drawn with wavesurfer's RegionsPlugin rather than a hand-rolled
   // overlay: the plugin positions every element as a percentage of wavesurfer's
@@ -452,8 +375,8 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
     const { beats, downbeatIndices } = grid
     const downbeats = new Set(downbeatIndices)
 
-    // beat_this can emit a final beat at/past the audio end (e.g. exactly at
-    // duration); wavesurfer can't position anything there, so such entries are
+    // gridFromFit's 3dp rounding can land the final beat at/past the audio
+    // end; wavesurfer can't position anything there, so such entries are
     // skipped rather than clamped onto the track edge.
     const drawable = (time: number) => time < duration
 
@@ -518,6 +441,10 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
     // pulse tick. Independent layers — both render even if they land on the
     // same suppressed tick, and coincident bass+drum onsets (kick+bass on a
     // downbeat) both draw. Explicit z-index stacks bass over drums over ticks.
+    //
+    // Onsets are measured from the audio and are true regardless of what the
+    // grid makes of them. When the grid is the thing in doubt they are the
+    // evidence you check it against, so they keep full contrast.
     if (drumsVisible && onsets) {
       onsets.drums.filter(drawable).forEach((time) => {
         const region = addRegion({ start: time, end: time, drag: false, resize: false })
@@ -558,26 +485,46 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
   // but is just a binary search; state only changes when the index changes,
   // so nothing re-renders per frame. Seeks/scrubs need no special-casing —
   // timeupdate fires and the search lands wherever the playhead is.
+  //
+  // Ask the clock, NEVER the event's payload. Wavesurfer emits timeupdate from
+  // a reactive effect subscribed to BOTH currentTime and isPlaying, and it
+  // passes the cached currentTime — a store refreshed only by media
+  // 'timeupdate' events, which the engine's shim deliberately does not stream
+  // (it emits discrete edges only). So the store idles at its initial 0, and
+  // PAUSING — an isPlaying change — re-fires the effect with that stale 0. Read
+  // literally, that says "the playhead is at 0:00, outside every 8-count", and
+  // the highlight tore itself down on every pause while the audio sat happily
+  // mid-track. getCurrentTime() goes straight to the engine's live clock and is
+  // always right, paused or not.
   useEffect(() => {
-    if (!wavesurfer || !isReady || !eightCountWindows) return
-    const track = (time: number) => {
-      const index = findEightCountIndex(eightCountWindows, time)
+    if (!wavesurfer || !isReady || !windows) return
+    const track = () => {
+      const index = findEightCountIndex(windows, wavesurfer.getCurrentTime())
       setCurrentEightCountIndex((prev) => (prev === index ? prev : index))
     }
-    track(wavesurfer.getCurrentTime())
+    track()
     return wavesurfer.on('timeupdate', track)
-  }, [wavesurfer, isReady, eightCountWindows])
+  }, [wavesurfer, isReady, windows])
 
   // Layer 6: highlight the active 8-count and number its beats 1..n. Extends
   // the Layer 2 regions (same plugin, wavesurfer-owned coordinates), so Layer
   // 4 scroll applies for free. Re-renders only when the active index or the
   // grid regions change — never per frame.
   useEffect(() => {
-    if (!gridRegions || !grid || !eightCountWindows) return
+    if (!gridRegions || !grid || !windows) return
+    // Off entirely while tapping. This layer asserts a count — a yellow block
+    // sliding under the playhead with 1..8 written on it — and during tap mode
+    // that count is the one the user is in the middle of replacing, so it is
+    // both wrong and loud, right where they need to watch their own markers.
+    // The pad's own 1..8 readout is the count that matters here; the phrase
+    // boundaries stay legible through Layer 2's shading and the downbeat ticks,
+    // so the ±1 count nudge is still judgeable without this.
+    if (tap.tapping) return
     if (currentEightCountIndex === null) return
-    const win = eightCountWindows[currentEightCountIndex]
-    // beat_this can emit a final beat at/past the audio end; a window
-    // starting there can't be positioned (same rule as the grid's drawable).
+    const win = windows[currentEightCountIndex]
+    // A grid's final beat can land at/past the audio end (3dp rounding); a
+    // window starting there can't be positioned (same rule as the grid's
+    // drawable).
     if (!(win.start < duration)) return
     const added: Region[] = []
 
@@ -602,11 +549,11 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
 
     // Labels render unconditionally: the main view's zoom is fixed, always
     // dense enough that 1..8 digits can't collide.
-    // Every group is labeled from 1: the backend (eight_count_grouping)
-    // trims beats to the first downbeat and chunks by 8 from there, so a
-    // group always starts on count 1 and only the LAST can be partial. If
-    // the backend ever emits a partial FIRST group (a pickup group not
-    // starting on count 1), this sequential labeling would be wrong.
+    // Every group is labeled from 1: gridFromFit marks an eight-count start
+    // every 8 beats from the tapped (or count-nudged) "1", so a group always
+    // starts on count 1 and only the LAST can be partial. If a grid ever
+    // carried a partial FIRST group (a pickup group not starting on count 1),
+    // this sequential labeling would be wrong.
     for (let i = 0; i < win.beatCount; i++) {
       const time = grid.beats[win.firstBeat + i]
       if (!(time < duration)) continue
@@ -617,7 +564,11 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
         resize: false,
         content: String(i + 1),
       })
-      styleRegion(label.element, { pointerEvents: 'none', border: 'none', zIndex: '6' })
+      styleRegion(label.element, {
+        pointerEvents: 'none',
+        border: 'none',
+        zIndex: '6',
+      })
       if (label.content) Object.assign(label.content.style, COUNT_LABEL_STYLE)
       added.push(label)
     }
@@ -640,7 +591,11 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
         resize: false,
         content: '&',
       })
-      styleRegion(label.element, { pointerEvents: 'none', border: 'none', zIndex: '6' })
+      styleRegion(label.element, {
+        pointerEvents: 'none',
+        border: 'none',
+        zIndex: '6',
+      })
       if (label.content) Object.assign(label.content.style, SUBDIVISION_LABEL_STYLE)
       added.push(label)
     }
@@ -653,7 +608,7 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
         if (!region.isRemoved) region.remove()
       })
     }
-  }, [gridRegions, grid, eightCountWindows, currentEightCountIndex, duration])
+  }, [gridRegions, grid, windows, currentEightCountIndex, duration, tap.tapping])
 
   // FIXED zoom (the app's only zoom — runtime zoom in/out is out of scope):
   // set wavesurfer's OWN zoom level once so SLICE_EIGHT_COUNTS eight-counts
@@ -703,7 +658,7 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
       minPxPerSec: 0,
       // Transport contention guard (pitfall 1): the minimap never seeks,
       // plays, or pauses — interaction is disabled here and pointer events
-      // are handled by seekMainTo against the MAIN instance only. Its cursor
+      // are handled by seekMainTo against the shared clock only. Its cursor
       // doubles as the global playhead line at the shared currentTime.
       interact: false,
       dragToSeek: false,
@@ -727,10 +682,10 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
   // rendered waveform on both views, swapped by handing the renderer the
   // mode's precomputed peak buffer directly — the same internal path zoom()
   // takes, so regions survive untouched. NOTHING else may react to the mode:
-  // beats, 8-counts, onsets, count labels, subdivisions, and bookmarks are
-  // properties of the TRACK, not the stem, and none of their effects depend
-  // on stemMode. Neither instance is destroyed or reloaded here (a reload
-  // would flip isReady and churn every overlay effect).
+  // beats, 8-counts, onsets, count labels, and subdivisions are properties of
+  // the TRACK, not the stem, and none of their effects depend on stemMode.
+  // Neither instance is destroyed or reloaded here (a reload would flip
+  // isReady and churn every overlay effect).
   useEffect(() => {
     engine.setMode(stemMode)
     const display = engine.displayBufferFor(stemMode)
@@ -793,122 +748,6 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
       if (box && !box.isRemoved) box.remove()
     }
   }, [wavesurfer, minimapRegions, duration])
-
-  // Bookmark glyphs on the MAIN (detail) view: a brown stem with a tappable
-  // diamond at the bottom edge. Bookmarks are positioned by TIME like every
-  // other region, so a "none"-mode bookmark renders exactly where it was
-  // stored — between beat markers — and is never pulled onto a grid line.
-  // Two bookmarks on the same grid point simply draw on top of each other.
-  useEffect(() => {
-    if (!gridRegions || !duration) return
-    const added: Region[] = []
-    bookmarkStore.bookmarks.forEach((entry) => {
-      if (!(entry.timestamp < duration)) return // can't position at/past the end
-      const selected = entry.id === selectedBookmarkId
-      const color = selected ? BOOKMARK_SELECTED_HUE : BOOKMARK_HUE
-
-      // Diamond + the user's label, side by side at the bottom edge. The whole
-      // group is the hit target: the region element is pointerEvents:none so it
-      // never blocks click-to-seek on the waveform, and this content opts back
-      // in — a 2px stem alone would be nearly unclickable.
-      const glyph = document.createElement('div')
-      Object.assign(glyph.style, {
-        position: 'absolute',
-        bottom: '0',
-        left: `${-BOOKMARK_GLYPH_SIZE / 2}px`,
-        display: 'flex',
-        alignItems: 'center',
-        gap: `${BOOKMARK_GLYPH_SIZE / 2}px`,
-        whiteSpace: 'nowrap',
-        pointerEvents: 'auto',
-        cursor: 'pointer',
-      })
-      glyph.title = entry.label || 'Bookmark (no label)'
-      const diamond = document.createElement('div')
-      Object.assign(diamond.style, {
-        flex: '0 0 auto',
-        width: `${BOOKMARK_GLYPH_SIZE}px`,
-        height: `${BOOKMARK_GLYPH_SIZE}px`,
-        backgroundColor: color,
-        transform: BOOKMARK_GLYPH_SHAPE,
-      })
-      glyph.appendChild(diamond)
-      if (entry.label) {
-        const text = document.createElement('span')
-        // Truncated for the timeline; the tooltip above carries the full note.
-        text.textContent = truncateLabel(entry.label)
-        Object.assign(text.style, BOOKMARK_LABEL_STYLE, { color })
-        glyph.appendChild(text)
-      }
-      glyph.addEventListener('click', (e) => {
-        e.stopPropagation()
-        setSelectedBookmarkId((prev) => (prev === entry.id ? null : entry.id))
-      })
-      const region = gridRegions.addRegion({
-        start: entry.timestamp,
-        end: entry.timestamp,
-        drag: false,
-        resize: false,
-        content: glyph,
-      })
-      styleRegion(region.element, {
-        pointerEvents: 'none',
-        borderLeft: `${BOOKMARK_STEM_WIDTH}px solid ${color}`,
-        borderRadius: '0',
-        height: '100%',
-        top: '0',
-        zIndex: '7', // above ticks, onsets, and Layer 6 labels
-      })
-      added.push(region)
-    })
-    return () => {
-      added.forEach((region) => {
-        if (!region.isRemoved) region.remove()
-      })
-    }
-  }, [gridRegions, duration, bookmarkStore.bookmarks, selectedBookmarkId])
-
-  // Bookmark ticks on the MINIMAP: navigation targets in the overview. Tapping
-  // one seeks to the bookmark's exact stored time (not the clicked pixel), via
-  // the same seek path the strip uses. stopPropagation keeps the strip's own
-  // pointer handler from also seeking to the click x.
-  useEffect(() => {
-    if (!minimapRegions || !duration) return
-    const added: Region[] = []
-    bookmarkStore.bookmarks.forEach((entry) => {
-      if (!(entry.timestamp < duration)) return
-      const selected = entry.id === selectedBookmarkId
-      const region = minimapRegions.addRegion({
-        start: entry.timestamp,
-        end: entry.timestamp,
-        drag: false,
-        resize: false,
-      })
-      styleRegion(region.element, {
-        pointerEvents: 'auto',
-        cursor: 'pointer',
-        borderLeft: `${BOOKMARK_TICK_WIDTH}px solid ${
-          selected ? BOOKMARK_SELECTED_HUE : BOOKMARK_HUE
-        }`,
-        borderRadius: '0',
-        height: '100%',
-        top: '0',
-        zIndex: '3',
-      })
-      region.element?.addEventListener('pointerdown', (e) => {
-        e.stopPropagation()
-        seekMainToTime(entry.timestamp)
-      })
-      added.push(region)
-    })
-    return () => {
-      added.forEach((region) => {
-        if (!region.isRemoved) region.remove()
-      })
-    }
-    // seekMainToTime closes over wavesurfer/duration, both in the deps already.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [minimapRegions, duration, bookmarkStore.bookmarks, selectedBookmarkId, wavesurfer])
 
   // Loop markers on BOTH views. The A and B EDGES render INDEPENDENTLY: A shows
   // the moment A is set, B the moment B is set — neither waits on the other, so
@@ -978,14 +817,16 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
     }
   }, [gridRegions, minimapRegions, duration, loop.start, loop.end, loop.enabled])
 
-  // The one seek path: move the MAIN instance — the single transport owner;
-  // the shared clock moves both views. Manual seeks don't auto-scroll a paused
+  // The one seek path: move the shared clock through the hoisted transport —
+  // never a view seeking another view. Manual seeks don't auto-scroll a paused
   // main view (autoScroll follows playback), so it's centered explicitly;
-  // during playback the next autoCenter lands on the same target.
-  const seekMainToTime = (time: number) => {
+  // during playback the next autoCenter lands on the same target. The centering
+  // is the only part of this that is a VIEW concern, which is why it lives here
+  // and the seek itself does not.
+  const seekAndCenter = (time: number) => {
     if (!wavesurfer || !duration) return
     const clamped = Math.min(Math.max(time, 0), duration)
-    wavesurfer.setTime(clamped)
+    transport.seek(clamped)
     const scrollEl = wavesurfer.getWrapper().parentElement
     if (scrollEl && scrollEl.scrollWidth > scrollEl.clientWidth) {
       wavesurfer.setScroll(
@@ -996,45 +837,13 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
 
   // Minimap seek surface: map pointer x → time, then seek. Clamped, so a drag
   // that overshoots the strip pins to the track edges.
-  const seekMainToX = (clientX: number, surface: HTMLDivElement) => {
+  const seekFromX = (clientX: number, surface: HTMLDivElement) => {
     if (!duration) return
     const rect = surface.getBoundingClientRect()
     if (!rect.width) return
     const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    seekMainToTime(fraction * duration)
+    seekAndCenter(fraction * duration)
   }
-
-  // Creating a bookmark selects it, so its info panel opens straight away —
-  // shift/delete/close/note are all one step from the Bookmark button.
-  const createBookmark = () => {
-    if (!wavesurfer || !duration) return
-    const id = bookmarkStore.create(
-      snapTime(wavesurfer.getCurrentTime(), snapMode, grid, duration),
-      snapMode,
-    )
-    setSelectedBookmarkId(id)
-  }
-
-  // SHIFT: move the selected bookmark to the playhead, re-snapped with the
-  // mode selected NOW ("move it the way I'm snapping today"). In "none" mode
-  // that lands on the raw playhead time, off-grid.
-  const shiftSelected = () => {
-    if (!wavesurfer || !duration || !selectedBookmarkId) return
-    bookmarkStore.shift(
-      selectedBookmarkId,
-      snapTime(wavesurfer.getCurrentTime(), snapMode, grid, duration),
-      snapMode,
-    )
-  }
-
-  const deleteSelected = () => {
-    if (!selectedBookmarkId) return
-    bookmarkStore.remove(selectedBookmarkId)
-    setSelectedBookmarkId(null)
-  }
-
-  const selectedBookmark =
-    bookmarkStore.bookmarks.find((entry) => entry.id === selectedBookmarkId) ?? null
 
   return (
     <div className="timeline">
@@ -1046,19 +855,15 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
           // Capture so a drag keeps seeking even when the pointer leaves the
           // strip; x is clamped, so overshoot pins to the track edges.
           e.currentTarget.setPointerCapture(e.pointerId)
-          seekMainToX(e.clientX, e.currentTarget)
+          seekFromX(e.clientX, e.currentTarget)
         }}
         onPointerMove={(e) => {
-          if (e.buttons & 1) seekMainToX(e.clientX, e.currentTarget)
+          if (e.buttons & 1) seekFromX(e.clientX, e.currentTarget)
         }}
       />
       <div className="timeline-controls">
-        <button onClick={() => wavesurfer?.playPause()} disabled={!isReady}>
-          {isPlaying ? 'Pause' : 'Play'}
-        </button>
-        <span>
-          {formatTime(currentTime)} / {formatTime(duration)}
-        </span>
+        <PlayPauseButton transport={transport} disabled={!isReady} />
+        <TimeReadout transport={transport} grid={grid} windows={windows} />
         <button
           onClick={() => setBassVisible((v) => !v)}
           disabled={!onsets}
@@ -1075,7 +880,60 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
         >
           Drums
         </button>
+        {/*
+          Re-tap is PERMANENT: always here, next to the transport, never locked
+          away once a grid exists — not behind a settings menu and not
+          conditional on anything tripping. Users get the count wrong sometimes
+          and must be able to redo it without re-importing the song. Hidden only
+          during first run, where tap mode is already forced open and there is
+          no grid to exit back to.
+        */}
+        {hasSavedGrid && (
+          <button
+            className="tap-enter"
+            onClick={tap.tapping ? tap.exit : tap.enter}
+            disabled={!isReady}
+            aria-pressed={tap.tapping}
+          >
+            {tap.tapping ? 'Exit tap mode' : 'Re-tap the count'}
+          </button>
+        )}
       </div>
+      {/*
+        The saved-grid nudge row: reachable during playback AND during a loop,
+        which is the whole point — a late A point clips the downbeat transient
+        on every iteration, and this is where you fix it while hearing it.
+        Hidden while tapping (the overlay carries its own nudge for the
+        pre-accept fit).
+      */}
+      {hasSavedGrid && !tap.tapping && (
+        <div className="timeline-controls" role="group" aria-label="Nudge grid">
+          <span>Nudge</span>
+          <button onClick={() => onNudgeGrid(-PHASE_NUDGE_MS, 0)}>−{PHASE_NUDGE_MS}ms</button>
+          <button onClick={() => onNudgeGrid(PHASE_NUDGE_MS, 0)}>+{PHASE_NUDGE_MS}ms</button>
+          <button onClick={() => onNudgeGrid(0, -1)}>◀ count</button>
+          <button onClick={() => onNudgeGrid(0, 1)}>count ▶</button>
+        </div>
+      )}
+      {tap.tapping && (
+        <TapOverlay
+          taps={tap.taps}
+          isPlaying={transport.isPlaying}
+          fit={tap.fit}
+          fitError={tap.error}
+          phaseNudgeMs={tap.phaseNudgeMs}
+          countNudge={tap.countNudge}
+          onTap={tap.record}
+          onNudgePhase={tap.nudgePhase}
+          onNudgeCount={tap.nudgeCount}
+          onAccept={tap.accept}
+          // First run has no grid to fall back to, so "cancel" just clears the
+          // session and stays in the tap state (nothing was persisted — there
+          // is no draft). With a grid, cancel returns to it untouched.
+          cancelLabel={hasSavedGrid ? 'Cancel' : 'Start over'}
+          onCancel={hasSavedGrid ? tap.exit : tap.enter}
+        />
+      )}
       {/*
         PROVISIONAL UI — stem mode selector. Five mutually exclusive taps over
         the engine's mode table; the active mode is shown filled. Tap only, by
@@ -1089,7 +947,7 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
         {STEM_MODES.map((mode) => (
           <button
             key={mode}
-            onClick={() => setStemMode(mode)}
+            onClick={() => onStemModeChange(mode)}
             aria-pressed={stemMode === mode}
             style={toggleStyle(stemMode === mode, STEM_MODE_ACTIVE_COLOR)}
           >
@@ -1102,7 +960,7 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
           Snap{' '}
           <select
             value={snapMode}
-            onChange={(e) => setSnapMode(e.target.value as SnapMode)}
+            onChange={(e) => onSnapModeChange(e.target.value as SnapMode)}
             aria-label="Snap mode"
           >
             {SNAP_MODES.map((mode) => (
@@ -1112,164 +970,12 @@ function Timeline({ engine, trackId, grid, onsets, onReady }: TimelineProps) {
             ))}
           </select>
         </label>
-        <button
-          onClick={createBookmark}
-          disabled={!isReady}
-          style={{ backgroundColor: BOOKMARK_HUE, borderColor: BOOKMARK_HUE, color: 'white' }}
-        >
-          Bookmark
-        </button>
-        <span>
-          {bookmarkStore.bookmarks.length} bookmark
-          {bookmarkStore.bookmarks.length === 1 ? '' : 's'}
-        </span>
       </div>
-      {/*
-        PROVISIONAL UI — placeholder trigger surface only. The touch/gesture model
-        for setting loop points is not decided yet (drag handles? tap two
-        bookmarks?), so these buttons are a thin shim over the loop engine's
-        imperative API (setLoop / setLoopStart / setLoopEnd / clearLoop /
-        setEnabled). Replace this row wholesale in the mobile pass; the engine
-        underneath does not change.
-      */}
       <div className="timeline-controls">
-        <button onClick={() => loop.setLoopStart(currentTime)} disabled={!isReady}>
-          Set A
-        </button>
-        <button onClick={() => loop.setLoopEnd(currentTime)} disabled={!isReady}>
-          Set B
-        </button>
-        <button
-          onClick={() => loop.setEnabled(!loop.enabled)}
-          disabled={loop.start === null || loop.end === null}
-          aria-pressed={loop.enabled}
-          style={toggleStyle(loop.enabled, LOOP_BAND_EDGE)}
-        >
-          Loop
-        </button>
-        <button onClick={loop.clearLoop} disabled={loop.start === null && loop.end === null}>
-          Clear
-        </button>
-        <span>
-          {loop.start !== null || loop.end !== null
-            ? `A ${loop.start !== null ? loop.start.toFixed(2) : '—'} / B ${
-                loop.end !== null ? loop.end.toFixed(2) : '—'
-              }`
-            : 'no loop'}
-        </span>
-        {/*
-          Speed: live playbackRate on all five stem sources (0.25x-2x). Rate
-          RESAMPLES — pitch shifts with speed — by accepted tradeoff; no
-          time-stretch. Grid, bookmarks, and loop A/B are track-time and do
-          not move with the rate.
-        */}
-        <label>
-          Speed{' '}
-          <input
-            type="range"
-            min={SPEED_MIN}
-            max={SPEED_MAX}
-            step={SPEED_STEP}
-            value={speed}
-            aria-label="Playback speed"
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          />
-        </label>
-        <span>{speed.toFixed(2)}×</span>
-        <button onClick={resetSpeed} disabled={speed === SPEED_DEFAULT}>
-          1×
-        </button>
+        <LoopControls loop={loop} transport={transport} disabled={!isReady} />
+        <SpeedControl speed={speed} />
       </div>
       {loop.error && <p className="error">{loop.error}</p>}
-      {selectedBookmark && (
-        <BookmarkInfo
-          // Keyed by id so switching bookmarks resets the label draft rather
-          // than carrying the previous bookmark's typing into this one.
-          key={selectedBookmark.id}
-          bookmark={selectedBookmark}
-          snapMode={snapMode}
-          onSeek={() => seekMainToTime(selectedBookmark.timestamp)}
-          onShift={shiftSelected}
-          onDelete={deleteSelected}
-          onRelabel={(label) => bookmarkStore.relabel(selectedBookmark.id, label)}
-          onClose={() => setSelectedBookmarkId(null)}
-        />
-      )}
-      {bookmarkStore.error && <p className="error">Bookmarks: {bookmarkStore.error}</p>}
-    </div>
-  )
-}
-
-// Info panel for the tapped bookmark: its id, time, and the mode it was
-// created with — plus an editable label, SHIFT (move to the playhead,
-// re-snapped by the mode selected NOW, which may differ from the creation
-// mode), and DELETE.
-function BookmarkInfo({
-  bookmark,
-  snapMode,
-  onSeek,
-  onShift,
-  onDelete,
-  onRelabel,
-  onClose,
-}: {
-  bookmark: Bookmark
-  snapMode: SnapMode
-  onSeek: () => void
-  onShift: () => void
-  onDelete: () => void
-  onRelabel: (label: string) => void
-  onClose: () => void
-}) {
-  // The input is a local draft: it commits on blur or Enter, so typing a label
-  // is ONE write, not one PUT per keystroke. Escape abandons the edit. The
-  // draft resyncs if the stored label changes underneath us — which is how a
-  // rolled-back failed write puts the old text back in the box.
-  const [draft, setDraft] = useState(bookmark.label)
-  useEffect(() => setDraft(bookmark.label), [bookmark.label])
-
-  // Escape blurs the input, and blur is the commit trigger — without this flag
-  // the blur handler would save the very text Escape just abandoned (it still
-  // sees the pre-Escape draft in its closure).
-  const abandoning = useRef(false)
-  const commitDraft = () => {
-    if (abandoning.current) {
-      abandoning.current = false
-      setDraft(bookmark.label)
-      return
-    }
-    onRelabel(draft)
-  }
-
-  return (
-    <div className="bookmark-info" style={{ borderColor: BOOKMARK_HUE }}>
-      <span>
-        <code>{bookmark.id.slice(0, 8)}</code> @ {bookmark.timestamp.toFixed(3)}s (snap:{' '}
-        {bookmark.snap_mode})
-      </span>
-      <input
-        value={draft}
-        placeholder="Add a note…"
-        aria-label="Bookmark label"
-        // The panel is keyed by bookmark id, so this mounts fresh each time one
-        // is opened: the note field is ready to type into immediately after
-        // hitting Bookmark.
-        autoFocus
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commitDraft}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.currentTarget.blur() // blur commits; relabel de-dupes the repeat
-          } else if (e.key === 'Escape') {
-            abandoning.current = true
-            e.currentTarget.blur()
-          }
-        }}
-      />
-      <button onClick={onSeek}>Go to</button>
-      <button onClick={onShift}>Shift to playhead ({snapMode})</button>
-      <button onClick={onDelete}>Delete</button>
-      <button onClick={onClose}>Close</button>
     </div>
   )
 }
