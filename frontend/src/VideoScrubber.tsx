@@ -1,14 +1,21 @@
 import { useCallback, useRef } from 'react'
-import { LOOP_BAND_EDGE, LOOP_BAND_FILL, LOOP_DISABLED_OPACITY } from './playback'
+import { LOOP_BAND_EDGE, LOOP_BAND_FILL } from './playback'
 import type { LoopController, Transport } from './playback'
+
+// A small dead zone (in raw seconds) enforced around each handle so a drag
+// can never cross the other one — the same rule TimelineOverview's A/B
+// handles use, for the same reason (see there for the full rationale).
+const HANDLE_GAP_S = 0.05
 
 /**
  * A plain, YouTube-style scrub bar for the video screen — click or drag
  * anywhere on it to seek. Unlike the Timeline's minimap this renders no
  * waveform and no grid; it exists to answer "where am I / where are A and B",
- * not to read the music. Dragging calls the same transport.seek() the
- * Timeline's minimap calls, so a seek from here is indistinguishable
- * downstream from one made anywhere else.
+ * not to read the music. Dragging the bar itself calls the same
+ * transport.seek() the Timeline's minimap calls; dragging an A/B handle
+ * calls loop.setLoopStart/setLoopEnd instead — the SAME calls
+ * TimelineOverview's handles make, so the loop can never disagree between
+ * the two screens.
  */
 export default function VideoScrubber({
   transport,
@@ -19,23 +26,24 @@ export default function VideoScrubber({
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
 
-  const seekFromClientX = useCallback(
+  const timeAtClientX = useCallback(
     (clientX: number) => {
       const el = trackRef.current
-      if (!el || !transport.duration) return
+      if (!el || !transport.duration) return 0
       const rect = el.getBoundingClientRect()
       const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-      transport.seek(fraction * transport.duration)
+      return fraction * transport.duration
     },
     [transport],
   )
 
   const duration = transport.duration || 0
-  const pct = (t: number) => Math.min(100, Math.max(0, (t / duration) * 100))
-  const playedPct = duration ? pct(transport.currentTime) : 0
-  const aPct = loop.start !== null && duration ? pct(loop.start) : null
-  const bPct = loop.end !== null && duration ? pct(loop.end) : null
-  const loopOpacity = loop.enabled ? 1 : LOOP_DISABLED_OPACITY
+  const pct = (t: number) => (duration ? Math.min(100, Math.max(0, (t / duration) * 100)) : 0)
+  const playedPct = pct(transport.currentTime)
+  // Always defined now (see useLoop) — A/B default to the whole track, so the
+  // band and its edge handles render from the moment a song opens.
+  const aPct = pct(loop.start)
+  const bPct = pct(loop.end)
 
   return (
     <div
@@ -48,33 +56,44 @@ export default function VideoScrubber({
       aria-valuenow={transport.currentTime}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
-        seekFromClientX(e.clientX)
+        transport.seek(timeAtClientX(e.clientX))
       }}
       onPointerMove={(e) => {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromClientX(e.clientX)
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) transport.seek(timeAtClientX(e.clientX))
       }}
     >
       <div className="video-scrubber-track">
-        {aPct !== null && bPct !== null && (
-          <div
-            className="video-scrubber-loop-band"
-            style={{ left: `${aPct}%`, width: `${bPct - aPct}%`, background: LOOP_BAND_FILL, opacity: loopOpacity }}
-          />
-        )}
+        <div
+          className="video-scrubber-loop-band"
+          style={{ left: `${aPct}%`, width: `${bPct - aPct}%`, background: LOOP_BAND_FILL }}
+        />
         <div className="video-scrubber-played" style={{ width: `${playedPct}%` }} />
-        {aPct !== null && (
-          <div
-            className="video-scrubber-marker"
-            style={{ left: `${aPct}%`, background: LOOP_BAND_EDGE, opacity: loopOpacity }}
-          />
-        )}
-        {bPct !== null && (
-          <div
-            className="video-scrubber-marker"
-            style={{ left: `${bPct}%`, background: LOOP_BAND_EDGE, opacity: loopOpacity }}
-          />
-        )}
         <div className="video-scrubber-thumb" style={{ left: `${playedPct}%` }} />
+        {(['a', 'b'] as const).map((which) => (
+          <div
+            key={which}
+            className={`video-scrubber-handle video-scrubber-handle-${which}`}
+            role="slider"
+            aria-label={which === 'a' ? 'Loop start' : 'Loop end'}
+            aria-valuemin={0}
+            aria-valuemax={duration}
+            aria-valuenow={which === 'a' ? loop.start : loop.end}
+            style={{ left: `${which === 'a' ? aPct : bPct}%`, background: LOOP_BAND_EDGE }}
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              e.currentTarget.setPointerCapture(e.pointerId)
+            }}
+            onPointerMove={(e) => {
+              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
+              e.stopPropagation()
+              const t = timeAtClientX(e.clientX)
+              if (which === 'a') loop.setLoopStart(Math.min(t, loop.end - HANDLE_GAP_S))
+              else loop.setLoopEnd(Math.max(t, loop.start + HANDLE_GAP_S))
+            }}
+          >
+            {which.toUpperCase()}
+          </div>
+        ))}
       </div>
     </div>
   )

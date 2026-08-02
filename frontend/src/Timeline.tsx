@@ -2,23 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWavesurfer } from '@wavesurfer/react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin, { type Region } from 'wavesurfer.js/plugins/regions'
-import { LoopControls, PlayPauseButton, SpeedControl, TimeReadout } from './controls'
+import { PlayPauseButton, SpeedControl, TimeReadout } from './controls'
+import { useCloseOnOutsideClick } from './dropdown'
 import { toggleStyle } from './styles'
 import { findEightCountIndex, type EightCountWindow } from './eightCount'
-import { SNAP_MODES, type SnapMode } from './snap'
 import {
   LOOP_BAND_EDGE,
   LOOP_BAND_EDGE_WIDTH,
   LOOP_BAND_FILL,
-  LOOP_DISABLED_OPACITY,
-  LOOP_MINIMAP_FILL,
   type LoopController,
   type SpeedController,
   type Transport,
 } from './playback'
 import { DEFAULT_STEM_MODE, STEM_MODES, type StemEngine, type StemMode } from './stemEngine'
-import { PHASE_NUDGE_MS } from './tapGrid'
 import type { TapSession } from './tapSession'
+import TimelineOverview from './TimelineOverview'
 import type { GridData, OnsetData } from './types'
 import TapOverlay from './TapOverlay'
 
@@ -45,18 +43,13 @@ interface TimelineProps {
   // grid can be tapped.
   grid?: GridData
   // Whether a PERSISTED grid exists — distinct from `grid`, which may be a
-  // preview. Gates the re-tap and nudge controls, which act on the saved grid.
+  // preview. Gates the re-tap control, which acts on the saved grid.
   hasSavedGrid: boolean
   windows: EightCountWindow[] | null
   onsets?: OnsetData
-  snapMode: SnapMode
-  onSnapModeChange: (mode: SnapMode) => void
   stemMode: StemMode
   onStemModeChange: (mode: StemMode) => void
   tap: TapSession
-  // Slide the SAVED grid's phase, or re-label its counts. Owned above so the
-  // write goes through the same persistence path as an accepted tap.
-  onNudgeGrid: (deltaMs: number, deltaCount: number) => void
   // Later layers (subdivisions, onset overlays) must position themselves via
   // this instance's own time↔pixel mapping — never independent coordinate math.
   onReady?: (wavesurfer: WaveSurfer) => void
@@ -82,19 +75,6 @@ const ONSET_WIDTH_SCALE = 1
 // stay readable through them; tune or revert here.
 const ACTIVE_BLOCK_FILL = 'rgba(250, 200, 40, 0.15)'
 const ACTIVE_BLOCK_BORDER = '1px solid rgba(200, 150, 20, 0.6)'
-
-// Overview minimap: a fixed strip under the main view with the whole track
-// visible at once. It is a second VIEW of the main instance's clock (shared
-// media element) and a seek surface; it never owns transport.
-const MINIMAP_HEIGHT = 40
-// Fit the entire duration to the container width — the minimap never scrolls.
-const MINIMAP_FILL_PARENT = true
-// Global playhead line on the minimap (the instance's own cursor).
-const MINIMAP_PLAYHEAD_COLOR = 'rgba(40, 40, 40, 0.9)'
-const MINIMAP_PLAYHEAD_WIDTH = 2
-// Read-only viewport box marking the main view's visible time-slice.
-const VIEWPORT_BOX_FILL = 'rgba(40, 40, 40, 0.07)'
-const VIEWPORT_BOX_BORDER = '1px solid rgba(40, 40, 40, 0.7)'
 
 // Count-number styling: top edge of the block, nudged right of the beat line
 // so the digit clears the (up to 3px wide) onset markers on the beat itself.
@@ -196,31 +176,27 @@ function Timeline({
   hasSavedGrid,
   windows,
   onsets,
-  snapMode,
-  onSnapModeChange,
   stemMode,
   onStemModeChange,
   tap,
-  onNudgeGrid,
   onReady,
 }: TimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const minimapRef = useRef<HTMLDivElement>(null)
-  // Mirror for effects that need the CURRENT mode without re-running on mode
-  // changes (the minimap is created once; its later re-skins come from the
-  // mode effect, not from re-creation).
-  const stemModeRef = useRef(stemMode)
-  stemModeRef.current = stemMode
-  // The minimap instance is kept in state (alongside its RegionsPlugin) so
-  // the mode effect can re-render its waveform on stem switches.
-  const [minimap, setMinimap] = useState<WaveSurfer | null>(null)
-  const [minimapRegions, setMinimapRegions] = useState<RegionsPlugin | null>(null)
   // Session-only visibility toggles for the onset overlays; both start off,
   // so the baseline view is pulse ticks + 8-count shading with no markers.
   // These are the one kind of state this screen legitimately owns: they change
   // nothing about the song, only what this view draws.
   const [bassVisible, setBassVisible] = useState(false)
   const [drumsVisible, setDrumsVisible] = useState(false)
+  // The Bass/Drums toggles above live behind a single "Onset" dropdown so the
+  // controls row doesn't grow with every stem this app learns to detect.
+  const [onsetMenuOpen, setOnsetMenuOpen] = useState(false)
+  const onsetMenuRef = useRef<HTMLDivElement>(null)
+  useCloseOnOutsideClick(onsetMenuOpen, setOnsetMenuOpen, onsetMenuRef)
+  // Same pattern for the stem mode selector, collapsed behind a "Hear" dropdown.
+  const [hearMenuOpen, setHearMenuOpen] = useState(false)
+  const hearMenuRef = useRef<HTMLDivElement>(null)
+  useCloseOnOutsideClick(hearMenuOpen, setHearMenuOpen, hearMenuRef)
   // Which 8-count window the playhead is in (null = outside every window),
   // and the grid's RegionsPlugin instance so the Layer 6 effect can add its
   // regions to the SAME plugin — one coordinate space, one paint layer.
@@ -638,184 +614,71 @@ function Timeline({
     return () => observer.disconnect()
   }, [wavesurfer, isReady, grid])
 
-  // Minimap: a SECOND wavesurfer instance over the SAME engine shim — one
-  // clock, two views. Playback, seeks, and timeupdate all live on the shared
-  // engine, so both views follow automatically. Peaks and duration come
-  // precomputed from the engine, which keeps construction side-effect free:
-  // with no URL and peaks supplied, wavesurfer fetches and decodes nothing.
-  // destroy() returns early for external media, so teardown never pauses
-  // playback. Created with the CURRENT mode's peaks (ref, not dep) so a mode
-  // switch never rebuilds it — later re-skins come from the mode effect.
-  useEffect(() => {
-    if (!wavesurfer || !isReady || !minimapRef.current) return
-    const instance = WaveSurfer.create({
-      container: minimapRef.current,
-      media: engine.media,
-      peaks: engine.peaksFor(stemModeRef.current),
-      duration: engine.duration,
-      height: MINIMAP_HEIGHT,
-      fillParent: MINIMAP_FILL_PARENT,
-      minPxPerSec: 0,
-      // Transport contention guard (pitfall 1): the minimap never seeks,
-      // plays, or pauses — interaction is disabled here and pointer events
-      // are handled by seekMainTo against the shared clock only. Its cursor
-      // doubles as the global playhead line at the shared currentTime.
-      interact: false,
-      dragToSeek: false,
-      autoplay: false,
-      autoScroll: false,
-      autoCenter: false,
-      cursorColor: MINIMAP_PLAYHEAD_COLOR,
-      cursorWidth: MINIMAP_PLAYHEAD_WIDTH,
-    })
-    const regions = instance.registerPlugin(RegionsPlugin.create())
-    setMinimap(instance)
-    setMinimapRegions(regions)
-    return () => {
-      setMinimap(null)
-      setMinimapRegions(null)
-      instance.destroy()
-    }
-  }, [wavesurfer, isReady, engine])
-
   // Stem mode → (a) audible gains, ramped inside the engine, and (b) the
-  // rendered waveform on both views, swapped by handing the renderer the
-  // mode's precomputed peak buffer directly — the same internal path zoom()
-  // takes, so regions survive untouched. NOTHING else may react to the mode:
-  // beats, 8-counts, onsets, count labels, and subdivisions are properties of
-  // the TRACK, not the stem, and none of their effects depend on stemMode.
-  // Neither instance is destroyed or reloaded here (a reload would flip
-  // isReady and churn every overlay effect).
+  // rendered waveform, swapped by handing the renderer the mode's precomputed
+  // peak buffer directly — the same internal path zoom() takes, so regions
+  // survive untouched. NOTHING else may react to the mode: beats, 8-counts,
+  // onsets, count labels, and subdivisions are properties of the TRACK, not
+  // the stem, and none of their effects depend on stemMode. The instance is
+  // never destroyed or reloaded here (a reload would flip isReady and churn
+  // every overlay effect).
   useEffect(() => {
     engine.setMode(stemMode)
     const display = engine.displayBufferFor(stemMode)
     if (wavesurfer && isReady) void wavesurfer.getRenderer().render(display)
-    if (minimap) void minimap.getRenderer().render(display)
-  }, [engine, stemMode, wavesurfer, isReady, minimap])
+  }, [engine, stemMode, wavesurfer, isReady])
 
-  // Minimap structure: the same 8-count shading the main view draws, from the
-  // same builder — shades only. Ticks, onset markers, and count labels are
-  // deliberately absent: at whole-track density they're sub-pixel mush.
+  // Loop markers on the main view. The always-active loop (see useLoop) is
+  // drawn at full opacity — there is no "set but off" state to dim anymore.
+  // The A and B EDGES render INDEPENDENTLY: A shows the moment A is set, B
+  // the moment B is set — neither waits on the other, so you see each
+  // endpoint land as you place it. The teal wash between them is a separate
+  // fill. Everything is time-defined, so the main view's zoom/scroll place it
+  // with no pixel math; non-interactive, so it can't eat the view's own
+  // click-to-seek. The overall timeline below draws its own copy of A/B (see
+  // TimelineOverview) since it isn't a wavesurfer instance and has no
+  // regions plugin to share.
   useEffect(() => {
-    if (!minimapRegions || !grid || !duration) return
-    const added = addEightCountShading(minimapRegions, grid, duration)
-    return () => {
-      added.forEach((region) => {
-        if (!region.isRemoved) region.remove()
-      })
-    }
-  }, [minimapRegions, grid, duration])
-
-  // Read-only viewport box: the time-slice the main view currently shows,
-  // derived from the main renderer's scroll geometry and drawn as a
-  // non-interactive region on the minimap (time-defined, so a minimap resize
-  // repositions it for free). Updated on the main view's scroll AND on
-  // timeupdate; it is an indicator only — not draggable.
-  useEffect(() => {
-    if (!wavesurfer || !minimapRegions || !duration) return
-    let box: Region | null = null
-    const update = () => {
-      const scrollEl = wavesurfer.getWrapper().parentElement
-      if (!scrollEl || !scrollEl.scrollWidth) return
-      const start = Math.max(0, (scrollEl.scrollLeft / scrollEl.scrollWidth) * duration)
-      const end = Math.min(
-        duration,
-        ((scrollEl.scrollLeft + scrollEl.clientWidth) / scrollEl.scrollWidth) * duration,
-      )
-      if (box && !box.isRemoved) {
-        box.setOptions({ start, end })
-      } else {
-        box = minimapRegions.addRegion({
-          start,
-          end,
-          drag: false,
-          resize: false,
-          color: VIEWPORT_BOX_FILL,
-        })
-        styleRegion(box.element, {
-          pointerEvents: 'none',
-          border: VIEWPORT_BOX_BORDER,
-          borderRadius: '0',
-          boxSizing: 'border-box',
-          zIndex: '2',
-        })
-      }
-    }
-    update()
-    const unsubscribe = [wavesurfer.on('scroll', update), wavesurfer.on('timeupdate', update)]
-    return () => {
-      unsubscribe.forEach((u) => u())
-      if (box && !box.isRemoved) box.remove()
-    }
-  }, [wavesurfer, minimapRegions, duration])
-
-  // Loop markers on BOTH views. The A and B EDGES render INDEPENDENTLY: A shows
-  // the moment A is set, B the moment B is set — neither waits on the other, so
-  // you see each endpoint land as you place it. The teal wash between them is a
-  // separate fill that only exists once both endpoints do (a fill needs a span).
-  // Everything is time-defined, so the main view's zoom/scroll and the minimap's
-  // fit-to-width place it with no pixel math; adding or clearing mid-playback
-  // touches nothing the playhead or viewport box depend on; non-interactive, so
-  // it can't eat the minimap's seek gesture.
-  useEffect(() => {
-    if (!duration) return
+    if (!gridRegions || !duration) return
     const added: Region[] = []
-    // A loop that's set but switched off stays visible, dimmed.
-    const opacity = loop.enabled ? '1' : LOOP_DISABLED_OPACITY
 
-    // A single vertical edge line at one endpoint, on one plugin.
-    const edge = (regions: RegionsPlugin | null, time: number, zIndex: string) => {
-      if (!regions) return
+    // A single vertical edge line at one endpoint.
+    const edge = (time: number, zIndex: string) => {
       const at = Math.min(time, duration)
-      const region = regions.addRegion({ start: at, end: at, drag: false, resize: false })
+      const region = gridRegions.addRegion({ start: at, end: at, drag: false, resize: false })
       styleRegion(region.element, {
         pointerEvents: 'none',
         borderLeft: `${LOOP_BAND_EDGE_WIDTH}px solid ${LOOP_BAND_EDGE}`,
         borderRadius: '0',
         height: '100%',
         top: '0',
-        opacity,
         zIndex,
       })
       added.push(region)
     }
-    // The wash spanning A..B, drawn only when BOTH endpoints exist.
-    const fill = (regions: RegionsPlugin | null, color: string, zIndex: string) => {
-      if (!regions || loop.start === null || loop.end === null) return
-      const region = regions.addRegion({
-        start: loop.start,
-        end: Math.min(loop.end, duration),
-        drag: false,
-        resize: false,
-        color,
-      })
-      styleRegion(region.element, {
-        pointerEvents: 'none',
-        borderRadius: '0',
-        opacity,
-        zIndex,
-      })
-      added.push(region)
-    }
-
-    // Fill first, then edges over it. Minimap stays under the viewport box (z2).
-    fill(gridRegions, LOOP_BAND_FILL, '2')
-    fill(minimapRegions, LOOP_MINIMAP_FILL, '1')
-    if (loop.start !== null) {
-      edge(gridRegions, loop.start, '3')
-      edge(minimapRegions, loop.start, '1')
-    }
-    if (loop.end !== null) {
-      edge(gridRegions, loop.end, '3')
-      edge(minimapRegions, loop.end, '1')
-    }
+    // The wash spanning A..B.
+    const region = gridRegions.addRegion({
+      start: loop.start,
+      end: Math.min(loop.end, duration),
+      drag: false,
+      resize: false,
+      color: LOOP_BAND_FILL,
+    })
+    styleRegion(region.element, {
+      pointerEvents: 'none',
+      borderRadius: '0',
+      zIndex: '2',
+    })
+    added.push(region)
+    edge(loop.start, '3')
+    edge(loop.end, '3')
 
     return () => {
       added.forEach((region) => {
         if (!region.isRemoved) region.remove()
       })
     }
-  }, [gridRegions, minimapRegions, duration, loop.start, loop.end, loop.enabled])
+  }, [gridRegions, duration, loop.start, loop.end])
 
   // The one seek path: move the shared clock through the hoisted transport —
   // never a view seeking another view. Manual seeks don't auto-scroll a paused
@@ -835,51 +698,44 @@ function Timeline({
     }
   }
 
-  // Minimap seek surface: map pointer x → time, then seek. Clamped, so a drag
-  // that overshoots the strip pins to the track edges.
-  const seekFromX = (clientX: number, surface: HTMLDivElement) => {
-    if (!duration) return
-    const rect = surface.getBoundingClientRect()
-    if (!rect.width) return
-    const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    seekAndCenter(fraction * duration)
-  }
-
   return (
     <div className="timeline">
       <div ref={containerRef} />
-      <div
-        ref={minimapRef}
-        className="timeline-minimap"
-        onPointerDown={(e) => {
-          // Capture so a drag keeps seeking even when the pointer leaves the
-          // strip; x is clamped, so overshoot pins to the track edges.
-          e.currentTarget.setPointerCapture(e.pointerId)
-          seekFromX(e.clientX, e.currentTarget)
-        }}
-        onPointerMove={(e) => {
-          if (e.buttons & 1) seekFromX(e.clientX, e.currentTarget)
-        }}
-      />
+      <TimelineOverview duration={duration} currentTime={transport.currentTime} loop={loop} onSeek={seekAndCenter} />
       <div className="timeline-controls">
         <PlayPauseButton transport={transport} disabled={!isReady} />
         <TimeReadout transport={transport} grid={grid} windows={windows} />
-        <button
-          onClick={() => setBassVisible((v) => !v)}
-          disabled={!onsets}
-          aria-pressed={bassVisible}
-          style={toggleStyle(bassVisible, 'rgba(210, 30, 30, 0.9)')}
-        >
-          Bass
-        </button>
-        <button
-          onClick={() => setDrumsVisible((v) => !v)}
-          disabled={!onsets}
-          aria-pressed={drumsVisible}
-          style={toggleStyle(drumsVisible, 'rgba(30, 90, 210, 0.9)')}
-        >
-          Drums
-        </button>
+        <div className="dropdown" ref={onsetMenuRef}>
+          <button
+            onClick={() => setOnsetMenuOpen((v) => !v)}
+            disabled={!onsets}
+            aria-haspopup="true"
+            aria-expanded={onsetMenuOpen}
+            style={toggleStyle(bassVisible || drumsVisible, 'rgba(90, 40, 160, 0.9)')}
+          >
+            Onset ▾
+          </button>
+          {onsetMenuOpen && (
+            <div className="dropdown-list" role="menu">
+              <button
+                role="menuitemcheckbox"
+                onClick={() => setBassVisible((v) => !v)}
+                aria-pressed={bassVisible}
+                style={toggleStyle(bassVisible, 'rgba(210, 30, 30, 0.9)')}
+              >
+                Bass
+              </button>
+              <button
+                role="menuitemcheckbox"
+                onClick={() => setDrumsVisible((v) => !v)}
+                aria-pressed={drumsVisible}
+                style={toggleStyle(drumsVisible, 'rgba(30, 90, 210, 0.9)')}
+              >
+                Drums
+              </button>
+            </div>
+          )}
+        </div>
         {/*
           Re-tap is PERMANENT: always here, next to the transport, never locked
           away once a grid exists — not behind a settings menu and not
@@ -899,33 +755,13 @@ function Timeline({
           </button>
         )}
       </div>
-      {/*
-        The saved-grid nudge row: reachable during playback AND during a loop,
-        which is the whole point — a late A point clips the downbeat transient
-        on every iteration, and this is where you fix it while hearing it.
-        Hidden while tapping (the overlay carries its own nudge for the
-        pre-accept fit).
-      */}
-      {hasSavedGrid && !tap.tapping && (
-        <div className="timeline-controls" role="group" aria-label="Nudge grid">
-          <span>Nudge</span>
-          <button onClick={() => onNudgeGrid(-PHASE_NUDGE_MS, 0)}>−{PHASE_NUDGE_MS}ms</button>
-          <button onClick={() => onNudgeGrid(PHASE_NUDGE_MS, 0)}>+{PHASE_NUDGE_MS}ms</button>
-          <button onClick={() => onNudgeGrid(0, -1)}>◀ count</button>
-          <button onClick={() => onNudgeGrid(0, 1)}>count ▶</button>
-        </div>
-      )}
       {tap.tapping && (
         <TapOverlay
           taps={tap.taps}
           isPlaying={transport.isPlaying}
           fit={tap.fit}
           fitError={tap.error}
-          phaseNudgeMs={tap.phaseNudgeMs}
-          countNudge={tap.countNudge}
           onTap={tap.record}
-          onNudgePhase={tap.nudgePhase}
-          onNudgeCount={tap.nudgeCount}
           onAccept={tap.accept}
           // First run has no grid to fall back to, so "cancel" just clears the
           // session and stays in the tap state (nothing was persisted — there
@@ -943,36 +779,36 @@ function Timeline({
         engine's setMode underneath does not change.
       */}
       <div className="timeline-controls" role="group" aria-label="Stem mode">
-        <span>Hear:</span>
-        {STEM_MODES.map((mode) => (
+        <div className="dropdown" ref={hearMenuRef}>
           <button
-            key={mode}
-            onClick={() => onStemModeChange(mode)}
-            aria-pressed={stemMode === mode}
-            style={toggleStyle(stemMode === mode, STEM_MODE_ACTIVE_COLOR)}
+            onClick={() => setHearMenuOpen((v) => !v)}
+            aria-haspopup="true"
+            aria-expanded={hearMenuOpen}
+            style={toggleStyle(stemMode !== 'all', STEM_MODE_ACTIVE_COLOR)}
           >
-            {STEM_MODE_LABELS[mode]}
+            Hear: {STEM_MODE_LABELS[stemMode]} ▾
           </button>
-        ))}
+          {hearMenuOpen && (
+            <div className="dropdown-list" role="menu">
+              {STEM_MODES.map((mode) => (
+                <button
+                  key={mode}
+                  role="menuitemradio"
+                  aria-checked={stemMode === mode}
+                  onClick={() => {
+                    onStemModeChange(mode)
+                    setHearMenuOpen(false)
+                  }}
+                  style={toggleStyle(stemMode === mode, STEM_MODE_ACTIVE_COLOR)}
+                >
+                  {STEM_MODE_LABELS[mode]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <div className="timeline-controls">
-        <label>
-          Snap{' '}
-          <select
-            value={snapMode}
-            onChange={(e) => onSnapModeChange(e.target.value as SnapMode)}
-            aria-label="Snap mode"
-          >
-            {SNAP_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {mode}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="timeline-controls">
-        <LoopControls loop={loop} transport={transport} disabled={!isReady} />
         <SpeedControl speed={speed} />
       </div>
       {loop.error && <p className="error">{loop.error}</p>}

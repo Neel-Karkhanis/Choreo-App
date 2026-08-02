@@ -1,4 +1,4 @@
-import { MIN_TAPS, PHASE_NUDGE_MS, RECOMMENDED_TAPS, bpmOf, type TapFit } from './tapGrid'
+import { MIN_TAPS, RECOMMENDED_TAPS, bpmOf, type TapFit } from './tapGrid'
 
 // The tap overlay: a panel over the main view, deliberately NOT a separate
 // screen. The waveform, the transport, and the playhead all stay live above it
@@ -13,11 +13,7 @@ export interface TapOverlayProps {
   // while still tapping or when the taps don't fit a tempo.
   fit: TapFit | null
   fitError: string | null
-  phaseNudgeMs: number
-  countNudge: number
   onTap: () => void
-  onNudgePhase: (deltaMs: number) => void
-  onNudgeCount: (delta: number) => void
   onAccept: () => void
   // What abandoning the session is called and does: "Cancel" when a saved grid
   // exists to return to, "Start over" on first run — where cancelling just
@@ -32,11 +28,7 @@ function TapOverlay({
   isPlaying,
   fit,
   fitError,
-  phaseNudgeMs,
-  countNudge,
   onTap,
-  onNudgePhase,
-  onNudgeCount,
   onAccept,
   cancelLabel,
   onCancel,
@@ -116,37 +108,6 @@ function TapOverlay({
         </div>
       )}
       {fitError && <p className="error">{fitError}</p>}
-
-      {/*
-        Nudge. The fit cannot recover a CONSTANT offset (input latency + tapping
-        early apply equally to every tap), and snapping to onsets is not an
-        option — kicks in syncopated genres are deliberately off-grid, so
-        snapping would marry beats to non-beat events exactly where this feature
-        is most needed. So: the user's eyes, and two cheap knobs.
-      */}
-      <div className="tap-nudge">
-        <span>Nudge</span>
-        <button onClick={() => onNudgePhase(-PHASE_NUDGE_MS)} disabled={!fit}>
-          −{PHASE_NUDGE_MS}ms
-        </button>
-        <button onClick={() => onNudgePhase(PHASE_NUDGE_MS)} disabled={!fit}>
-          +{PHASE_NUDGE_MS}ms
-        </button>
-        <span className="tap-nudge-value">
-          {phaseNudgeMs > 0 ? '+' : ''}
-          {phaseNudgeMs}ms
-        </span>
-        <button onClick={() => onNudgeCount(-1)} disabled={!fit}>
-          ◀ count
-        </button>
-        <button onClick={() => onNudgeCount(1)} disabled={!fit}>
-          count ▶
-        </button>
-        <span className="tap-nudge-value">
-          {countNudge > 0 ? '+' : ''}
-          {countNudge}
-        </span>
-      </div>
 
       <div className="tap-actions">
         <button onClick={onAccept} disabled={!enough} className="tap-accept">

@@ -16,11 +16,80 @@ li {
   color: crimson;
 }
 
-.timeline-minimap {
+/* The overall timeline: a plain whole-song position bar with draggable A/B
+   loop handles — not a waveform view. Padded so the round handles don't clip
+   at the track's own left/right edges when A is at 0 or B is at duration. */
+.timeline-overview {
   margin-top: 4px;
+  padding: 0 9px;
+}
+
+.timeline-overview-track {
+  position: relative;
+  height: 24px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
-  /* Pointer-drag seeking owns horizontal gestures on touch devices. */
   touch-action: none;
+}
+
+.timeline-overview-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background-color: #ddd;
+  pointer-events: none;
+}
+
+.timeline-overview-played {
+  position: absolute;
+  left: 0;
+  height: 4px;
+  border-radius: 2px;
+  background-color: #333;
+  pointer-events: none;
+}
+
+.timeline-overview-playhead {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 14px;
+  background-color: #333;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.timeline-overview-loop-band {
+  position: absolute;
+  height: 4px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.timeline-overview-handle {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px white;
+  touch-action: none;
+}
+
+.timeline-overview-handle:active {
+  cursor: grabbing;
 }
 
 .timeline-controls {
@@ -28,6 +97,47 @@ li {
   align-items: center;
   gap: 0.75rem;
   margin-top: 0.5rem;
+}
+
+/* Shared by the Onset and Hear dropdowns: each collapses a row of related
+   toggles behind one button so the controls row doesn't grow with every stem
+   this app learns to detect. */
+.dropdown {
+  position: relative;
+}
+
+.dropdown-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  margin-top: 0.25rem;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Speed's dropdown carries a wider slider plus its own quarter-x dial labels,
+   so it gets a little more room and a labeled tick row underneath. */
+.dropdown-list-speed {
+  width: 220px;
+}
+
+.dropdown-list-speed input[type='range'] {
+  width: 100%;
+}
+
+.speed-dial-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #666;
+  padding: 0 2px;
 }
 
 /* Tap mode's own hue: green, used nowhere else in the app. */
@@ -126,7 +236,6 @@ li {
   font-size: 0.9rem;
 }
 
-.tap-nudge,
 .tap-actions {
   display: flex;
   align-items: center;
@@ -134,12 +243,6 @@ li {
   gap: 0.4rem;
   margin-top: 0.5rem;
   font-size: 0.9rem;
-}
-
-.tap-nudge-value {
-  min-width: 3.5rem;
-  font-variant-numeric: tabular-nums;
-  color: #555;
 }
 
 .tap-accept {
@@ -350,13 +453,29 @@ li {
   pointer-events: none;
 }
 
-.video-scrubber-marker {
+/* Draggable A/B loop handles, styled to match TimelineOverview's own —
+   same size, same white halo, same grab cursor — so the loop reads as one
+   control that happens to be reachable from two screens. */
+.video-scrubber-handle {
   position: absolute;
-  top: -3px;
-  width: 2px;
-  height: 11px;
-  transform: translateX(-1px);
-  pointer-events: none;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px white;
+  touch-action: none;
+}
+
+.video-scrubber-handle:active {
+  cursor: grabbing;
 }
 
 .video-scrubber-thumb {

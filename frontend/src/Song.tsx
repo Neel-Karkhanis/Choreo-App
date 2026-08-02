@@ -4,9 +4,8 @@ import VideoScreen from './VideoScreen'
 import { buildEightCountWindows } from './eightCount'
 import { useManualGrid, type ManualGridStore } from './manualGrid'
 import { useEngineTransport, useLoop, useSpeed } from './playback'
-import { API_BASE, DEFAULT_SNAP_MODE, snapTime, type SnapDirection, type SnapMode } from './snap'
+import { API_BASE, snapTime, type SnapDirection } from './snap'
 import { DEFAULT_STEM_MODE, StemEngine, loadStems, type StemMode } from './stemEngine'
-import { nudgeGrid } from './tapGrid'
 import { useTapSession } from './tapSession'
 import type { GridData, LibrarySong, OnsetData } from './types'
 
@@ -204,7 +203,6 @@ function SongShell({
   videoUrl: string | null
 }) {
   const [screen, setScreen] = useState<Screen>('timeline')
-  const [snapMode, setSnapMode] = useState<SnapMode>(DEFAULT_SNAP_MODE)
   const [stemMode, setStemMode] = useState<StemMode>(DEFAULT_STEM_MODE)
 
   // Duration comes from the engine, which holds it as a readonly constant taken
@@ -241,34 +239,18 @@ function SongShell({
     [effectiveGrid, duration],
   )
 
-  // Loop points snap according to the snap mode selected right now —
-  // DIRECTIONALLY (the loop floors A and ceils B so it encloses whole musical
-  // units). In "none" mode both keep the raw playhead time.
+  // Loop points always snap to the beat — DIRECTIONALLY (the loop floors A
+  // and ceils B so it encloses whole musical units). There is no user-facing
+  // snap mode anymore; snapTime gracefully degrades to a plain clamp when
+  // there is no grid yet, which is what lets A/B default to the track's true
+  // start/end before a song has ever been tapped.
   const snapToMode = useCallback(
-    (time: number, direction: SnapDirection) =>
-      snapTime(time, snapMode, effectiveGrid, duration, direction),
-    [snapMode, effectiveGrid, duration],
+    (time: number, direction: SnapDirection) => snapTime(time, 'beat', effectiveGrid, duration, direction),
+    [effectiveGrid, duration],
   )
   // The loop drives the ENGINE (native buffer-source looping). Same clock as
   // everything else, and one instance for every screen.
-  const loop = useLoop(engine, snapToMode)
-
-  // Nudge the SAVED grid — a core control, not a tap-mode afterthought. Every
-  // grid in the app carries the tap session's constant touch→audio latency
-  // (50–150ms) plus early-tap bias, and that offset lands directly on loop
-  // points; the fix has to be reachable while the song plays and while the loop
-  // runs, so the correction is HEARD landing rather than adjusted blind. Each
-  // press re-derives the grid from its own fit (phase slides, or the "1"
-  // re-labels — the fitted tempo is never touched) and writes through the same
-  // save path as an accepted tap, so the correction persists like any other.
-  const onNudgeGrid = useCallback(
-    (deltaMs: number, deltaCount: number) => {
-      if (!grid) return
-      const next = nudgeGrid(grid, duration, deltaMs / 1000, deltaCount)
-      if (next) manual.save(next)
-    },
-    [grid, duration, manual],
-  )
+  const loop = useLoop(engine, snapToMode, duration)
 
   // An audio song has one screen; a video song has two, user-swappable. The
   // swap is a render choice, nothing more.
@@ -302,12 +284,9 @@ function SongShell({
           hasSavedGrid={!!grid}
           windows={windows}
           onsets={onsets}
-          snapMode={snapMode}
-          onSnapModeChange={setSnapMode}
           stemMode={stemMode}
           onStemModeChange={setStemMode}
           tap={tap}
-          onNudgeGrid={onNudgeGrid}
         />
       ) : (
         <VideoScreen

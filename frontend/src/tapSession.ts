@@ -26,16 +26,12 @@ export interface TapSession {
   taps: number[]
   fit: TapFit | null
   error: string | null
-  phaseNudgeMs: number
-  countNudge: number
   // The live tapped grid while the session is open, or null. Takes the saved
   // grid's place wherever a grid is consumed.
   preview: GridData | null
   enter: () => void
   exit: () => void
   record: () => void
-  nudgePhase: (deltaMs: number) => void
-  nudgeCount: (delta: number) => void
   accept: () => void
 }
 
@@ -64,8 +60,6 @@ export function useTapSession({
   const [taps, setTaps] = useState<number[]>([])
   const [fit, setFit] = useState<TapFit | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [phaseNudgeMs, setPhaseNudgeMs] = useState(0)
-  const [countNudge, setCountNudge] = useState(0)
 
   // First run: no saved grid means the song opens IN the tap state — a state
   // of the main view, not a modal and not a separate screen. Playback,
@@ -91,8 +85,6 @@ export function useTapSession({
     setTaps([])
     setFit(null)
     setError(null)
-    setPhaseNudgeMs(0)
-    setCountNudge(0)
   }, [])
 
   const exit = useCallback(() => {
@@ -136,13 +128,9 @@ export function useTapSession({
     return () => clearTimeout(timer)
   }, [tapping, taps, duration])
 
-  // The tapped grid, live. Nudging re-derives it from the same fit — no refit,
-  // so the knobs respond instantly.
-  const preview = useMemo(
-    () =>
-      fit && duration ? gridFromFit(fit, duration, phaseNudgeMs / 1000, countNudge) : null,
-    [fit, duration, phaseNudgeMs, countNudge],
-  )
+  // The tapped grid, live — straight from the fit, no correction knobs left
+  // to apply.
+  const preview = useMemo(() => (fit && duration ? gridFromFit(fit, duration) : null), [fit, duration])
 
   // Accept: refit from scratch rather than trusting the settled preview, so a
   // user who accepts DURING the settle window (before a preview exists) gets
@@ -157,26 +145,19 @@ export function useTapSession({
       setError(result.error)
       return
     }
-    onGridTapped?.(gridFromFit(result.fit, duration, phaseNudgeMs / 1000, countNudge))
+    onGridTapped?.(gridFromFit(result.fit, duration))
     exit()
-  }, [taps, duration, phaseNudgeMs, countNudge, onGridTapped, exit])
-
-  const nudgePhase = useCallback((deltaMs: number) => setPhaseNudgeMs((v) => v + deltaMs), [])
-  const nudgeCount = useCallback((delta: number) => setCountNudge((v) => v + delta), [])
+  }, [taps, duration, onGridTapped, exit])
 
   return {
     tapping,
     taps,
     fit,
     error,
-    phaseNudgeMs,
-    countNudge,
     preview,
     enter,
     exit,
     record,
-    nudgePhase,
-    nudgeCount,
     accept,
   }
 }
