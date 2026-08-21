@@ -1,4 +1,4 @@
-import { MIN_TAPS, RECOMMENDED_TAPS, bpmOf, type TapFit } from './tapGrid'
+import { MIN_TAPS, RECOMMENDED_TAPS, type TapFit } from './tapGrid'
 
 // The tap overlay: a panel over the main view, deliberately NOT a separate
 // screen. The waveform, the transport, and the playhead all stay live above it
@@ -14,11 +14,16 @@ export interface TapOverlayProps {
   fit: TapFit | null
   fitError: string | null
   onTap: () => void
+  // Starts playback. Wired to the pad itself while paused (see the pad's
+  // !isPlaying branch below), since taps can't record against a frozen
+  // clock — there is nothing to tap yet until the song is moving.
+  onPlay: () => void
   onAccept: () => void
-  // What abandoning the session is called and does: "Cancel" when a saved grid
-  // exists to return to, "Start over" on first run — where cancelling just
-  // clears the taps and the view stays in the tap state, because with auto
-  // detection gone there is nowhere else for an ungridded song to go.
+  // What restarting the tap count is called: "Restart" when a saved grid
+  // exists to fall back to (still doesn't — clicking it just clears the taps
+  // and stays in the tap state, same as "Start over" on first run; see
+  // Timeline.tsx's onCancel wiring / tapSession.ts's restart). Two labels for
+  // the one action because the copy differs by whether a saved grid exists.
   cancelLabel: string
   onCancel: () => void
 }
@@ -29,6 +34,7 @@ function TapOverlay({
   fit,
   fitError,
   onTap,
+  onPlay,
   onAccept,
   cancelLabel,
   onCancel,
@@ -44,9 +50,6 @@ function TapOverlay({
     <div className="tap-panel">
       <div className="tap-panel-head">
         <strong>Tap the 1, then every count you feel.</strong>
-        <span className="tap-hint">
-          Tap the pad or press Space. The count you tap becomes the grid&apos;s count.
-        </span>
       </div>
 
       <div
@@ -73,7 +76,18 @@ function TapOverlay({
             </span>
           </>
         ) : (
-          <span className="tap-pad-label">Press Play, then tap each count</span>
+          <button
+            type="button"
+            className="tap-pad-play"
+            aria-label="Play"
+            // Stops the pad's own onPointerDown from also firing onTap — a
+            // no-op while paused anyway (record() checks isPlaying), but this
+            // keeps the click unambiguously "start playback", nothing else.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={onPlay}
+          >
+            ▶
+          </button>
         )}
       </div>
 
@@ -84,37 +98,19 @@ function TapOverlay({
           {count < RECOMMENDED_TAPS && ` · ${RECOMMENDED_TAPS} recommended`}
         </span>
       </div>
-      {/*
-        Not decoration: the fit is a SLOPE, so its error scales inversely with
-        how long the tap window is. At 16 taps a steady tapper still lands ~1/3
-        of a beat off by 3:00 in the worst decile; at 32 that drops to ~1/8.
-        Hence the floor at 16 and the nagging up to 32.
-      */}
-      {enough && count < RECOMMENDED_TAPS && (
-        <p className="tap-note">
-          Enough to accept — but keep going to {RECOMMENDED_TAPS} and the grid will hold
-          much better at the end of the track.
-        </p>
-      )}
-
-      {fit && (
-        <div className="tap-fit">
-          <span>
-            <strong>{bpmOf(fit).toFixed(1)}</strong> counts/min
-          </span>
-          <span>
-            {fit.kept} taps used{fit.dropped > 0 && `, ${fit.dropped} off-beat dropped`}
-          </span>
-        </div>
-      )}
       {fitError && <p className="error">{fitError}</p>}
 
       <div className="tap-actions">
         <button onClick={onAccept} disabled={!enough} className="tap-accept">
-          Accept grid
+          Accept
         </button>
-        <button onClick={onCancel}>{cancelLabel}</button>
         {!fit && enough && <span className="tap-hint">Stop tapping to preview the grid.</span>}
+        {/* Pushed to the far right of the row, clear of Accept/the hint —
+            it's the reset action, not the next step, so it shouldn't sit
+            shoulder-to-shoulder with Accept. */}
+        <button onClick={onCancel} style={{ marginLeft: 'auto' }}>
+          {cancelLabel}
+        </button>
       </div>
     </div>
   )

@@ -20,14 +20,37 @@ export const SPEED_MAX = PLAYBACK_RATE_MAX
 export const SPEED_STEP = 0.25
 export const SPEED_DEFAULT = 1
 
-// Loop band: a 4th visual treatment, distinct from the 8-count greys, the
-// Layer 6 yellow highlight, the red/blue onsets, and the brown bookmarks.
-// Translucent teal wash bracketed by solid edges at A and B. The loop is
-// always active (see useLoop), so this is drawn at full opacity always —
-// there is no dimmed "set but off" state anymore.
-export const LOOP_BAND_FILL = 'rgba(20, 150, 150, 0.12)'
-export const LOOP_BAND_EDGE = 'rgba(0, 120, 125, 0.9)'
-export const LOOP_BAND_EDGE_WIDTH = 2
+// Loop band. design/handoff/README.md called for a translucent accent wash
+// across A..B on the main timeline ("loop region band -> accent,
+// translucent") bracketed by solid accent edges — but at the user's explicit
+// request the main view's wash is now OFF: with the loop always active and
+// spanning the full track by default, that wash tinted every 8-count region
+// inside it, undermining the purple(active)/grey(inactive) 8-count
+// distinction. What remains on the main view is a labeled marker per
+// boundary — colored to match its own drag handle (LoopBoundaryHandle.tsx's
+// --color-loop-pin-a/-b; see index.css's comment on those tokens for why
+// each has been re-hued more than once at the user's explicit request), so a
+// marker here always reads as the same A/B as the pin that set it. Each
+// boundary is drawn only while it
+// sits away from its default track edge (A off 0, B off duration) — at the
+// user's explicit request: a marker fixed at the very start/end of every
+// waveform read as clutter stating the obvious, so it now appears only once
+// the user has actually moved that boundary inward (see Timeline.tsx's own
+// marker effect for the >0/<duration gate). LOOP_BAND_FILL remains in use on
+// the minimap (TimelineOverview) and video scrubber: those are plain
+// position bars with no waveform underneath to tint, so the confound above
+// never applied to them — only the main view's wash was removed. All driven
+// from index.css tokens via var() so a theme change repaints them for free —
+// these are DOM region styles, not canvas, so no explicit redraw is needed
+// here (contrast Timeline.tsx's waveColor, which is canvas and does need one).
+export const LOOP_BAND_FILL = 'var(--color-loop-band-fill)'
+export const LOOP_BAND_EDGE_A = 'var(--color-loop-pin-a)'
+export const LOOP_BAND_EDGE_B = 'var(--color-loop-pin-b)'
+// Widened from the original 2px hairline to a "bubble" bar, at the user's
+// explicit request — the badge in Timeline.tsx's marker effect scales off
+// this too (see LOOP_BAND_BADGE_SIZE there) so the pole and its flag stay
+// proportioned if this is ever retuned.
+export const LOOP_BAND_EDGE_WIDTH = 4
 
 /**
  * Playhead + play/pause, read straight off the engine.
@@ -156,10 +179,11 @@ interface LoopRange {
  *
  * `snap` is injected rather than imported so the loop honors the app's beat
  * grid without this hook needing to know where grids come from, asked for a
- * DIRECTION: A floors, B ceils. Snapping is always to the beat — there is no
- * user-facing mode selector — but `snap` gracefully degrades to a plain
- * clamp when there is no grid yet (see snapTime), which is what keeps A at
- * exactly 0 and B at exactly `duration` before a track has ever been tapped.
+ * DIRECTION: A floors, B ceils. The MODE (beat/4-count/8-count) is chosen by
+ * the caller — see Song.tsx's snapMode, changed by tapping a loop handle —
+ * but `snap` gracefully degrades to a plain clamp when there is no grid yet
+ * (see snapTime), which is what keeps A at exactly 0 and B at exactly
+ * `duration` before a track has ever been tapped.
  *
  * ENFORCEMENT lives in the engine, not here: the committed region is pushed
  * into StemEngine.setLoop, which sets loop/loopStart/loopEnd NATIVELY on all
@@ -219,7 +243,7 @@ export function useLoop(
       const start = snap(rawStart, 'floor')
       const end = snap(rawEnd, 'ceil')
       if (start >= end) {
-        setError('Loop needs two different points — A and B snapped to the same spot.')
+        setError('Loop needs two different points: A and B snapped to the same spot.')
         return
       }
       rawRange.current = { start: rawStart, end: rawEnd }

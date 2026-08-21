@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body { margin: 0; background: oklch(0.9 0.005 90); }
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:24px">
+  <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" width="407" height="656" hint-size="407px,656px">
+    <div style="width:407px;height:656px;background:{{ pageBg }};font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',Helvetica,Arial,sans-serif;color:{{ textColor }};overflow:auto;box-sizing:border-box;padding:52px 18px 18px">
+
+      <sc-if value="{{ isLibrary }}" hint-placeholder-val="{{ true }}">
+        <div style="width:85%;margin:25px auto 0">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:1px">
+              <svg width="30" height="30" viewBox="0 0 100 100" preserveAspectRatio="none" style="flex:none">
+                <path d="M92.5,67.6 L67.6,92.5 L32.4,92.5 L7.5,67.6 L7.5,32.4 L32.4,7.5 L67.6,7.5 L92.5,32.4" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+                <path d="M77.7,61.5 L61.5,77.7 L38.5,77.7 L22.3,61.5 L22.3,38.5 L38.5,22.3 L61.5,22.3 L77.7,38.5" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+                <sc-for list="{{ dividerLines }}" as="d" hint-placeholder-count="6">
+                  <line x1="{{ d.x1 }}" y1="{{ d.y1 }}" x2="{{ d.x2 }}" y2="{{ d.y2 }}" stroke="{{ accentColor }}" stroke-width="4" stroke-linecap="round"></line>
+                </sc-for>
+                <path d="M77.7,61.5 L92.5,67.6" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+                <path d="M77.7,38.5 L92.5,32.4" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+              </svg>
+              <h1 style="font-size:21px;font-weight:700;letter-spacing:-0.02em;margin:0">horeo</h1>
+            </div>
+            <button style="border:none;background:oklch(0.22 0.01 90);color:white;padding:8px 14px;border-radius:980px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Import song</button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:15px">
+            <sc-for list="{{ songs }}" as="song" hint-placeholder-count="5">
+              <div onClick="{{ showSong }}" style="display:flex;align-items:center;justify-content:center;gap:12px;padding:9px 6px;border-bottom:1.15px solid color-mix(in oklab, {{ accentColor }} 45%, {{ cardBorder }});cursor:pointer">
+                <div style="width:7px;height:7px;border-radius:50%;background:{{ song.dotColor }};flex:none"></div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:600;color:{{ song.titleColor }}">{{ song.title }}</div>
+                  <sc-if value="{{ song.note }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:10px;font-weight:600;letter-spacing:0.02em;color:oklch(0.5 0.1 80);margin-top:2px">{{ song.note }}</div>
+                  </sc-if>
+                </div>
+                <span style="font-size:12px;color:{{ mutedText }};font-variant-numeric:tabular-nums">{{ song.duration }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSong }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;margin-top:25px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <button onClick="{{ showLibrary }}" style="border:none;background:none;color:{{ mutedText }};font-size:16px;cursor:pointer;padding:2px">←</button>
+              <h1 style="font-size:15px;font-weight:700;margin:0;letter-spacing:-0.01em">Levitating - Dua Lipa</h1>
+            </div>
+            <svg width="29" height="29" viewBox="0 0 100 100" preserveAspectRatio="none" style="flex:none">
+              <path d="M92.5,67.6 L67.6,92.5 L32.4,92.5 L7.5,67.6 L7.5,32.4 L32.4,7.5 L67.6,7.5 L92.5,32.4" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+              <path d="M77.7,61.5 L61.5,77.7 L38.5,77.7 L22.3,61.5 L22.3,38.5 L38.5,22.3 L61.5,22.3 L77.7,38.5" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+              <sc-for list="{{ dividerLines }}" as="d" hint-placeholder-count="6">
+                <line x1="{{ d.x1 }}" y1="{{ d.y1 }}" x2="{{ d.x2 }}" y2="{{ d.y2 }}" stroke="{{ accentColor }}" stroke-width="4" stroke-linecap="round"></line>
+              </sc-for>
+              <path d="M77.7,61.5 L92.5,67.6" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+              <path d="M77.7,38.5 L92.5,32.4" fill="none" stroke="{{ accentColor }}" stroke-width="8"></path>
+            </svg>
+          </div>
+          <div style="display:flex;gap:2px;background:{{ chipBg }};padding:2px;border-radius:8px;width:fit-content;margin:0 auto 12px">
+            <button onClick="{{ showTimeline }}" style="border:none;background:{{ timelineTabBg }};color:{{ timelineTabColor }};padding:4px 11px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">Timeline</button>
+            <button onClick="{{ showVideo }}" style="border:none;background:{{ videoTabBg }};color:{{ videoTabColor }};padding:4px 11px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">Video</button>
+          </div>
+
+          <sc-if value="{{ isVideoScreen }}" hint-placeholder-val="{{ false }}">
+            <div style="width:100%;aspect-ratio:16/9;background:oklch(0.15 0.005 90);border-radius:12px;display:flex;align-items:center;justify-content:center;color:oklch(0.5 0.005 90);font-size:12px;letter-spacing:0.02em;position:relative;margin-bottom:14px">
+              video preview
+              <div style="position:absolute;left:14px;right:14px;bottom:10px;height:5px;border-radius:3px;background:oklch(1 0 0 / 20%);cursor:pointer">
+                <div style="position:absolute;left:0;top:0;bottom:0;width:22%;background:{{ accentColor }};border-radius:3px"></div>
+                <div style="position:absolute;left:22%;top:50%;width:11px;height:11px;border-radius:50%;background:white;transform:translate(-50%,-50%)"></div>
+                <div style="position:absolute;left:8%;top:50%;width:14px;height:14px;border-radius:50%;background:oklch(0.6 0.18 145);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:white">A</div>
+                <div style="position:absolute;left:13%;top:50%;width:14px;height:14px;border-radius:50%;background:oklch(0.8 0.18 95);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:white">B</div>
+              </div>
+              <button aria-label="Fullscreen" style="position:absolute;right:14px;bottom:24px;border:none;background:oklch(1 0 0 / 15%);width:22px;height:22px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+              </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button style="border:1px solid {{ inputBorder }};background:{{ inputBg }};width:32px;height:32px;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">▶</button>
+              <span style="font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">0:18 / 4:25</span>
+              <button onClick="{{ toggleSpeed }}" aria-label="Playback speed" style="border:1px solid oklch(0.85 0.003 90);background:{{ speedBtnBg }};padding:6px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 18a8 8 0 1 1 16 0" stroke="{{ speedBtnColor }}" stroke-width="2" stroke-linecap="round"></path>
+                  <line x1="12" y1="18" x2="16" y2="12" stroke="{{ speedBtnColor }}" stroke-width="2" stroke-linecap="round"></line>
+                  <circle cx="12" cy="18" r="1.3" fill="{{ speedBtnColor }}"></circle>
+                </svg>
+              </button>
+              <label style="font-size:11px;font-weight:600;color:{{ mutedText }};display:flex;align-items:center;gap:6px;margin-left:auto">
+                Hear
+                <select style="border:1px solid {{ inputBorder }};background:{{ inputBg }};padding:4px 7px;border-radius:8px;font-size:11px;font-weight:600;color:inherit;cursor:pointer">
+                  <sc-for list="{{ stemModes }}" as="mode" hint-placeholder-count="5">
+                    <option>{{ mode.label }}</option>
+                  </sc-for>
+                </select>
+              </label>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isTimelineScreen }}" hint-placeholder-val="{{ true }}">
+            <div style="background:{{ cardBg }};border:1px solid {{ cardBorder }};border-radius:12px;padding:22px;width:100%;box-sizing:border-box">
+              <div style="position:relative;height:150px;display:flex;align-items:center;gap:2px">
+                <sc-for list="{{ waveBars }}" as="b" hint-placeholder-count="64">
+                  <div style="flex:1;min-width:2px;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative">
+                    <div style="width:100%;height:{{ b.h }}%;background:oklch(0.62 0.005 90);border-radius:3px"></div>
+                    <sc-if value="{{ b.bass }}" hint-placeholder-val="{{ false }}">
+                      <div style="position:absolute;top:50%;transform:translateY(-50%);width:2px;height:75%;background:oklch(0.5 0.18 260)"></div>
+                    </sc-if>
+                    <sc-if value="{{ b.drums }}" hint-placeholder-val="{{ false }}">
+                      <div style="position:absolute;top:50%;transform:translateY(-50%);width:2px;height:50%;background:oklch(0.55 0.2 25)"></div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+                <div style="position:absolute;left:8%;width:5%;top:0;bottom:0;background:color-mix(in oklab, {{ accentColor }} 22%, transparent)"></div>
+                <div style="position:absolute;left:8%;top:0;bottom:0;width:2px;background:{{ accentColor }}"></div>
+                <div style="position:absolute;left:13%;top:0;bottom:0;width:2px;background:{{ accentColor }}"></div>
+              </div>
+              <div style="height:1px;background:{{ dividerColor }};margin:20px -22px 20px"></div>
+              <div style="position:relative;height:28px;display:flex;align-items:center">
+                <div style="position:absolute;left:8%;right:87%;height:4px;background:oklch(0.6 0.005 90);border-radius:3px"></div>
+                <div style="position:absolute;left:13%;right:0;height:4px;background:oklch(0.85 0.003 90);border-radius:3px"></div>
+                <div style="position:absolute;left:8%;top:50%;width:14px;height:14px;border-radius:50%;background:oklch(0.6 0.18 145);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:white">A</div>
+                <div style="position:absolute;left:13%;top:50%;width:14px;height:14px;border-radius:50%;background:oklch(0.8 0.18 95);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:white">B</div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap">
+                <button style="border:1px solid {{ inputBorder }};background:{{ inputBg }};width:32px;height:32px;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">▶</button>
+                <span style="font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">0:18 / 4:25</span>
+                <label style="font-size:11px;font-weight:600;color:{{ mutedText }};display:flex;align-items:center;gap:6px;margin-left:auto">
+                  Onsets
+                  <select defaultValue="Drums" style="border:1px solid {{ inputBorder }};background:{{ inputBg }};padding:4px 7px;border-radius:8px;font-size:11px;font-weight:600;color:inherit;cursor:pointer">
+                    <option>Off</option>
+                    <option style="color:oklch(0.5 0.18 260)">Bass</option>
+                    <option style="color:oklch(0.55 0.2 25)">Drums</option>
+                    <option>Both</option>
+                  </select>
+                </label>
+                <label style="font-size:11px;font-weight:600;color:{{ mutedText }};display:flex;align-items:center;gap:6px;margin-left:auto">
+                  Hear
+                  <select style="border:1px solid {{ inputBorder }};background:{{ inputBg }};padding:4px 7px;border-radius:8px;font-size:11px;font-weight:600;color:inherit;cursor:pointer">
+                    <sc-for list="{{ stemModes }}" as="mode" hint-placeholder-count="5">
+                      <option>{{ mode.label }}</option>
+                    </sc-for>
+                  </select>
+                </label>
+              </div>
+              <div style="display:flex;justify-content:flex-start;margin-top:-22px;margin-left:5px">
+                <button onClick="{{ toggleSpeed }}" aria-label="Playback speed" style="border:1px solid oklch(0.85 0.003 90);background:{{ speedBtnBg }};padding:6px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 18a8 8 0 1 1 16 0" stroke="{{ speedBtnColor }}" stroke-width="2" stroke-linecap="round"></path>
+                    <line x1="12" y1="18" x2="16" y2="12" stroke="{{ speedBtnColor }}" stroke-width="2" stroke-linecap="round"></line>
+                    <circle cx="12" cy="18" r="1.3" fill="{{ speedBtnColor }}"></circle>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <sc-if value="{{ showTapPanel }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1.5px solid {{ accentColor }};background:color-mix(in oklab, {{ accentColor }} 6%, {{ cardBg }});border-radius:12px;padding:12px 16px;margin-top:14px">
+  <h3 style="margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:-0.01em">Tap on the 1, then every count you feel.</h3>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style="flex:1;height:5px;border-radius:3px;background:oklch(0.9 0.003 90);position:relative;overflow:hidden">
+                    <div style="position:absolute;left:0;top:0;bottom:0;width:0%;background:{{ accentColor }};border-radius:3px"></div>
+                  </div>
+                  <span style="font-size:10px;color:oklch(0.5 0.005 90);white-space:nowrap">0/16 min</span>
+                  <button onClick="{{ toggleTapStarted }}" style="background:{{ tapBtnBg }};color:{{ tapBtnColor }};border:none;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">{{ tapBtnLabel }}</button>
+                </div>
+              </div>
+            </sc-if>
+          </sc-if>
+        </div>
+      </sc-if>
+
+    </div>
+    <div style="position:absolute;left:50%;bottom:24px;transform:translateX(-50%);display:flex;gap:4px;background:{{ chipBg }};padding:3px;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.08)">
+      <button onClick="{{ showLibrary }}" style="border:none;background:{{ libTabBg }};color:{{ libTabColor }};padding:6px 14px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">Library</button>
+      <button onClick="{{ showSong }}" style="border:none;background:{{ songTabBg }};color:{{ songTabColor }};padding:6px 14px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">{{ currentSongName }}</button>
+    </div>
+  </x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;accent&quot;: {&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#9333ea&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#9333ea&quot;,&quot;#2563eb&quot;,&quot;#059669&quot;,&quot;#e11d48&quot;],&quot;section&quot;:&quot;Feel&quot;},
+  &quot;darkMode&quot;: {&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Feel&quot;}
+}">
+class Component extends DCLogic {
+  state = { view: 'library', showSpeed: false, songScreen: 'timeline', tapStarted: false };
+  renderVals() {
+    const songs = [
+      { title: 'Levitating - Dua Lipa', titleColor: 'inherit', dotColor: 'oklch(0.6 0.13 155)', duration: '3:18', note: null },
+      { title: 'good 4 u - Olivia Rodrigo', titleColor: 'inherit', dotColor: 'oklch(0.65 0.1 80)', duration: '2:58', note: 'Needs counting' },
+      { title: 'As It Was - Harry Styles', titleColor: 'inherit', dotColor: 'oklch(0.6 0.13 155)', duration: '2:47', note: null },
+    ];
+    const isLibrary = this.state.view === 'library';
+    const accentColor = this.props.accent ?? '#9333ea';
+    const dark = this.props.darkMode ?? false;
+    const pageBg = dark ? 'oklch(0.18 0.006 290)' : 'oklch(0.98 0.002 90)';
+    const textColor = dark ? 'oklch(0.95 0.004 90)' : 'oklch(0.2 0.005 90)';
+    const cardBg = dark ? 'oklch(0.24 0.008 290)' : 'white';
+    const cardBorder = dark ? 'oklch(0.34 0.012 290)' : 'oklch(0.91 0.003 90)';
+    const chipBg = dark ? 'oklch(0.28 0.01 290)' : 'oklch(0.94 0.003 90)';
+    const inputBg = dark ? 'oklch(0.26 0.009 290)' : 'white';
+    const inputBorder = dark ? 'oklch(0.4 0.012 290)' : 'oklch(0.85 0.003 90)';
+    const mutedText = dark ? 'oklch(0.68 0.008 90)' : 'oklch(0.55 0.005 90)';
+    const dividerColor = dark ? 'oklch(0.36 0.012 290)' : 'oklch(0.88 0.003 90)';
+    const dividerPairs = [
+      [67.6, 92.5, 61.5, 77.7], [32.4, 92.5, 38.5, 77.7],
+      [7.5, 67.6, 22.3, 61.5], [7.5, 32.4, 22.3, 38.5],
+      [32.4, 7.5, 38.5, 22.3], [67.6, 7.5, 61.5, 22.3],
+    ];
+    return {
+      pageBg, textColor, cardBg, cardBorder, chipBg, inputBg, inputBorder, mutedText, dividerColor,
+      dividerLines: dividerPairs.map(([x1, y1, x2, y2]) => ({ x1, y1, x2, y2 })),
+      tapBtnLabel: this.state.tapStarted ? 'Accept' : 'Begin',
+      tapBtnBg: this.state.tapStarted ? 'oklch(0.85 0.003 90)' : accentColor,
+      tapBtnColor: this.state.tapStarted ? 'oklch(0.5 0.005 90)' : 'white',
+      toggleTapStarted: () => this.setState({ tapStarted: true }),
+      songs,
+      isLibrary,
+      isSong: !isLibrary,
+      accentColor,
+      currentSongName: 'Levitating',
+      showSpeed: this.state.showSpeed,
+      speedBtnBg: this.state.showSpeed ? accentColor : inputBg,
+      speedBtnColor: this.state.showSpeed ? 'white' : mutedText,
+      toggleSpeed: () => this.setState((s) => ({ showSpeed: !s.showSpeed })),
+      isVideoScreen: this.state.songScreen === 'video',
+      isTimelineScreen: this.state.songScreen === 'timeline',
+      showTapPanel: this.state.songScreen === 'timeline',
+      videoTabBg: this.state.songScreen === 'video' ? cardBg : 'transparent',
+      videoTabColor: this.state.songScreen === 'video' ? 'inherit' : mutedText,
+      timelineTabBg: this.state.songScreen === 'timeline' ? cardBg : 'transparent',
+      timelineTabColor: this.state.songScreen === 'timeline' ? 'inherit' : mutedText,
+      showVideo: () => this.setState({ songScreen: 'video' }),
+      showTimeline: () => this.setState({ songScreen: 'timeline' }),
+      waveBars: Array.from({ length: 64 }, (_, i) => {
+        const envelope = 0.55 + 0.45 * Math.sin(i * 0.045 + 0.6);
+        const jitter = Math.abs(Math.sin(i * 1.7)) * 0.6 + Math.abs(Math.sin(i * 0.37)) * 0.4;
+        return {
+          h: Math.max(6, Math.min(97, envelope * jitter * 100)),
+          bass: i % 9 === 3,
+          drums: i % 5 === 1,
+        };
+      }),
+      stemModes: ['All', 'Vocals', 'Drums', 'Bass', 'Instrumental'].map((label) => ({ label })),
+      libTabBg: isLibrary ? cardBg : 'transparent',
+      libTabColor: isLibrary ? 'inherit' : mutedText,
+      songTabBg: !isLibrary ? cardBg : 'transparent',
+      songTabColor: !isLibrary ? 'inherit' : mutedText,
+      showLibrary: () => this.setState({ view: 'library' }),
+      showSong: () => this.setState({ view: 'song' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Logo from './Logo'
 import { formatTime } from './format'
 import { API_BASE } from './snap'
-import type { LibrarySong, LibraryState } from './types'
+import type { LibrarySong } from './types'
 
 // LEVEL 1 of the app: every song the backend has ever known, and the door into
 // each one.
@@ -13,41 +14,48 @@ import type { LibrarySong, LibraryState } from './types'
 // and re-importing the same file gets it back untouched. Hiding that row, or
 // deleting the grid behind it, would silently destroy the one artifact in this
 // app that cannot be recomputed.
-
-const STATE_LABEL: Record<LibraryState, string> = {
-  ready: 'Ready',
-  needs_tap: 'Needs a count',
-  stems_evicted: 'File missing',
+//
+// The design (design/handoff/README.md "1. Library") only models a binary dot
+// (counted/needs-counting) with a single nullable note string. Rather than
+// collapsing stems_evicted into one of those two, it gets a third dot color
+// (var(--color-muted-text), since the design has no third hue for it) and
+// keeps its own richer, branching note text — see StateNote.
+function dotState(song: LibrarySong): 'ready' | 'needs_tap' | 'stems_evicted' {
+  return song.state
 }
 
 function StateNote({ song }: { song: LibrarySong }) {
   if (song.state === 'stems_evicted') {
     return (
-      <p className="song-note">
+      <span className="song-note">
         The audio file is no longer in the library folder, so this song can&apos;t be opened.
         {song.grid_present ? (
           <>
             {' '}
             <strong>Your tapped count is still saved.</strong> Import{' '}
             {song.filename ? <code>{song.filename}</code> : 'the same file'} again and it comes
-            back exactly as you left it — the grid is keyed to the audio itself, not to the
+            back exactly as you left it. The grid is keyed to the audio itself, not to the
             filename.
           </>
         ) : (
           ' Import it again to restore it.'
         )}
-      </p>
+      </span>
     )
   }
   if (song.state === 'needs_tap') {
-    return <p className="song-note">Opens straight into tap mode — count it once and it sticks.</p>
+    return (
+      <span className="song-note" data-tone="amber">
+        Needs counts
+      </span>
+    )
   }
   if (!song.stems_present) {
     return (
-      <p className="song-note">
+      <span className="song-note">
         Stems were cleared from the cache. Opening this song re-separates them first, which takes
         a few minutes; your tapped count is unaffected.
-      </p>
+      </span>
     )
   }
   return null
@@ -107,7 +115,10 @@ export default function Library({ onOpen }: { onOpen: (song: LibrarySong) => voi
   return (
     <main className="library">
       <header className="library-head">
-        <h1>Choreo</h1>
+        <div className="library-brand">
+          <Logo />
+          <h1 className="library-wordmark">horeo</h1>
+        </div>
         <div>
           <input
             ref={fileRef}
@@ -116,8 +127,8 @@ export default function Library({ onOpen }: { onOpen: (song: LibrarySong) => voi
             hidden
             onChange={(e) => void onPick(e.target.files?.[0])}
           />
-          <button onClick={() => fileRef.current?.click()} disabled={importing}>
-            {importing ? 'Importing…' : 'Import new song'}
+          <button className="import-button" onClick={() => fileRef.current?.click()} disabled={importing}>
+            {importing ? 'Importing…' : 'Import song'}
           </button>
         </div>
       </header>
@@ -130,25 +141,30 @@ export default function Library({ onOpen }: { onOpen: (song: LibrarySong) => voi
 
       <ul className="song-list">
         {songs.map((song) => (
-          <li key={song.md5} className={`song-row is-${song.state}`}>
-            <div className="song-row-main">
-              <button
-                className="song-open"
-                // The evicted state is the one state that genuinely cannot be
-                // opened: the engine plays the original file, and no amount of
-                // cached derived data substitutes for it.
-                disabled={song.state === 'stems_evicted'}
-                onClick={() => onOpen(song)}
-              >
-                {song.filename ?? song.id ?? `(unnamed · ${song.md5.slice(0, 8)})`}
-              </button>
-              <span className={`song-state is-${song.state}`}>{STATE_LABEL[song.state]}</span>
-              {song.media_kind === 'video' && <span className="song-kind">video</span>}
-              {song.duration !== null && (
-                <span className="song-duration">{formatTime(song.duration)}</span>
-              )}
-            </div>
-            <StateNote song={song} />
+          <li key={song.md5}>
+            <button
+              type="button"
+              className="song-row"
+              // The evicted state is the one state that genuinely cannot be
+              // opened: the engine plays the original file, and no amount of
+              // cached derived data substitutes for it.
+              disabled={song.state === 'stems_evicted'}
+              onClick={() => onOpen(song)}
+            >
+              <span className="song-dot" data-state={dotState(song)} aria-hidden="true" />
+              <span className="song-row-text">
+                <span className="song-title">
+                  {song.filename ?? song.id ?? `(unnamed · ${song.md5.slice(0, 8)})`}
+                </span>
+                <StateNote song={song} />
+              </span>
+              <span className="song-meta">
+                {song.media_kind === 'video' && <span className="song-kind-flag">VIDEO</span>}
+                {song.duration !== null && (
+                  <span className="song-duration">{formatTime(song.duration)}</span>
+                )}
+              </span>
+            </button>
           </li>
         ))}
       </ul>

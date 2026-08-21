@@ -1,12 +1,7 @@
 import { useCallback, useRef } from 'react'
-import { LOOP_BAND_EDGE, LOOP_BAND_FILL, type LoopController } from './playback'
-
-// A small dead zone (in raw seconds) enforced around each handle so a drag
-// can never cross the other one. Clamped here in the component rather than
-// relying on useLoop's own start>=end rejection, which would otherwise
-// auto-swap A and B mid-drag — confusing for a direct-manipulation gesture,
-// even though it's the right behavior for the "Set A"/"Set B" buttons.
-const HANDLE_GAP_S = 0.05
+import LoopBoundaryHandle from './LoopBoundaryHandle'
+import { LOOP_BAND_FILL, type LoopController } from './playback'
+import type { SnapMode } from './snap'
 
 /**
  * The overall timeline: a plain whole-song position bar, not a waveform view.
@@ -18,21 +13,25 @@ const HANDLE_GAP_S = 0.05
  * answers "where in the whole song am I / where are A and B".
  *
  * A and B are ALWAYS present (see useLoop — they default to the full track)
- * and playback always loops between them; dragging is the ONLY way to change
- * them now — there are no Set A/Set B/Loop/Clear buttons anymore. Dragging
- * calls loop.setLoopStart/setLoopEnd, which is always beat-snapped, so a
- * handle can only ever come to rest on a beat.
+ * and playback always loops between them. Dragging a handle moves it;
+ * tapping one (no drag) opens a menu to pick what it snaps to — beat,
+ * 4-count, or 8-count (see LoopBoundaryHandle) — there are no Set A/Set
+ * B/Loop/Clear buttons anymore.
  */
 export default function TimelineOverview({
   duration,
   currentTime,
   loop,
   onSeek,
+  snapMode,
+  onSnapModeChange,
 }: {
   duration: number
   currentTime: number
   loop: LoopController
   onSeek: (time: number) => void
+  snapMode: SnapMode
+  onSnapModeChange: (mode: SnapMode) => void
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
 
@@ -81,29 +80,18 @@ export default function TimelineOverview({
         <div className="timeline-overview-played" style={{ width: `${playedPct}%` }} />
         <div className="timeline-overview-playhead" style={{ left: `${playedPct}%` }} />
         {(['a', 'b'] as const).map((which) => (
-          <div
+          <LoopBoundaryHandle
             key={which}
+            which={which}
             className={`timeline-overview-handle timeline-overview-handle-${which}`}
-            role="slider"
-            aria-label={which === 'a' ? 'Loop start' : 'Loop end'}
-            aria-valuemin={0}
-            aria-valuemax={duration}
-            aria-valuenow={which === 'a' ? loop.start : loop.end}
-            style={{ left: `${which === 'a' ? aPct : bPct}%`, background: LOOP_BAND_EDGE }}
-            onPointerDown={(e) => {
-              e.stopPropagation()
-              e.currentTarget.setPointerCapture(e.pointerId)
-            }}
-            onPointerMove={(e) => {
-              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-              e.stopPropagation()
-              const t = timeAtClientX(e.clientX)
-              if (which === 'a') loop.setLoopStart(Math.min(t, loop.end - HANDLE_GAP_S))
-              else loop.setLoopEnd(Math.max(t, loop.start + HANDLE_GAP_S))
-            }}
-          >
-            {which.toUpperCase()}
-          </div>
+            leftPct={which === 'a' ? aPct : bPct}
+            time={which === 'a' ? loop.start : loop.end}
+            duration={duration}
+            loop={loop}
+            timeAtClientX={timeAtClientX}
+            snapMode={snapMode}
+            onSnapModeChange={onSnapModeChange}
+          />
         ))}
       </div>
     </div>

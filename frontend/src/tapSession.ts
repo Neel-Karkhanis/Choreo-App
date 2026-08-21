@@ -31,6 +31,11 @@ export interface TapSession {
   preview: GridData | null
   enter: () => void
   exit: () => void
+  // Clears the taps/fit/error and stays IN the tap state — unlike exit, which
+  // also leaves tap mode. Backs the "Restart" button (Timeline.tsx) when a
+  // saved grid exists to fall back to: restarting should let the user re-tap
+  // from zero without being kicked back out to that saved grid first.
+  restart: () => void
   record: () => void
   accept: () => void
 }
@@ -157,6 +162,7 @@ export function useTapSession({
     preview,
     enter,
     exit,
+    restart: reset,
     record,
     accept,
   }

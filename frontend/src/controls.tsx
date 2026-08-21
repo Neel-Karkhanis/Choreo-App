@@ -10,6 +10,7 @@ import {
   type SpeedController,
   type Transport,
 } from './playback'
+import { STEM_MODES, type StemMode } from './stemEngine'
 import { toggleStyle } from './styles'
 import type { GridData } from './types'
 
@@ -19,7 +20,16 @@ const SPEED_DIALS: number[] = []
 for (let v = SPEED_MIN; v <= SPEED_MAX + 1e-9; v += SPEED_STEP) {
   SPEED_DIALS.push(Math.round(v * 100) / 100)
 }
-const SPEED_ACTIVE_COLOR = 'rgba(210, 120, 20, 0.9)'
+const SPEED_ACTIVE_COLOR = 'var(--color-accent)'
+
+// Stem mode selector's labels.
+const STEM_MODE_LABELS: Record<StemMode, string> = {
+  all: 'All',
+  vocals: 'Vocals',
+  drums: 'Drums',
+  bass: 'Bass',
+  instrumental: 'Instrumental',
+}
 
 // The transport controls, once.
 //
@@ -40,8 +50,16 @@ export function PlayPauseButton({
   disabled?: boolean
 }) {
   return (
-    <button onClick={transport.toggle} disabled={disabled}>
-      {transport.isPlaying ? 'Pause' : 'Play'}
+    <button
+      className="play-pause-button"
+      onClick={transport.toggle}
+      disabled={disabled}
+      aria-label={transport.isPlaying ? 'Pause' : 'Play'}
+      // The play triangle's own ink sits left-of-center in its glyph box;
+      // nudge it so the button reads visually centered in both states.
+      style={{ paddingLeft: transport.isPlaying ? 0 : 2 }}
+    >
+      {transport.isPlaying ? '❚❚' : '▶'}
     </button>
   )
 }
@@ -51,7 +69,7 @@ export function PlayPauseButton({
  *
  * The count is the point — this app is for learning choreography, where "1:23"
  * is far less useful than "phrase 6, count 3". It reads null before the first
- * eight-count start and after the last beat, and shows an em dash there rather
+ * eight-count start and after the last beat, and shows "no count" there rather
  * than inventing a count.
  */
 export function TimeReadout({
@@ -70,7 +88,7 @@ export function TimeReadout({
         {formatTime(transport.currentTime)} / {formatTime(transport.duration)}
       </span>
       <span className="readout-count">
-        {position ? `phrase ${position.phrase} · count ${position.count}` : 'count —'}
+        {position ? `phrase ${position.phrase} · count ${position.count}` : 'no count'}
       </span>
     </span>
   )
@@ -81,9 +99,13 @@ export function TimeReadout({
  * RESAMPLES — pitch shifts with speed — by accepted tradeoff; there is no
  * time-stretch. Grid and loop A/B are track-time and do not move with the rate.
  *
- * Collapsed behind a button showing the current rate, same as the Onset and
- * Hear dropdowns: the slider itself only needs to be reachable while actually
- * changing speed, not parked in the controls row at all times.
+ * Collapsed behind a button (design/handoff/README.md: "speed dial"): the
+ * slider itself only needs to be reachable while actually changing speed,
+ * not parked in the controls row at all times. Only the trigger button is
+ * restyled to the design's icon/active-state look here — the picker
+ * (dropdown-list-speed below) is explicitly out of scope: the design only
+ * mocks the dial's toggle, not a real picker UI, so this reuses the
+ * app's pre-existing slider-based one unchanged, pending its own design pass.
  */
 export function SpeedControl({ speed }: { speed: SpeedController }) {
   const [open, setOpen] = useState(false)
@@ -93,12 +115,21 @@ export function SpeedControl({ speed }: { speed: SpeedController }) {
   return (
     <div className="dropdown" ref={ref}>
       <button
+        className="speed-dial-button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="true"
         aria-expanded={open}
+        aria-label={`Playback speed: ${speed.speed.toFixed(2)}×`}
         style={toggleStyle(speed.speed !== SPEED_DEFAULT, SPEED_ACTIVE_COLOR)}
       >
-        Speed: {speed.speed.toFixed(2)}× ▾
+        {/* design/handoff/Choreo Redesign.dc.html's speed-dial icon, ported
+            verbatim (arc + hand + hub); stroke/fill use currentColor so
+            toggleStyle's active-state color above drives the icon too. */}
+        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 18a8 8 0 1 1 16 0" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+          <line x1={12} y1={18} x2={16} y2={12} stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+          <circle cx={12} cy={18} r={1.3} fill="currentColor" />
+        </svg>
       </button>
       {open && (
         <div className="dropdown-list dropdown-list-speed" role="menu">
@@ -128,5 +159,47 @@ export function SpeedControl({ speed }: { speed: SpeedController }) {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Stem mode: which of the five mixes (all/vocals/drums/bass/instrumental)
+ * the engine plays and, on the Timeline, which peaks its waveform draws.
+ * Every screen renders the SAME control over the SAME hoisted stemMode state,
+ * so switching what you hear on the Timeline and switching it on the video
+ * screen are the same action, never two copies that can disagree.
+ *
+ * A plain native <select> (design/handoff/README.md: "Hear" stem-mode
+ * select) — the design's own five options (All/Vocals/Drums/Bass/
+ * Instrumental) are exactly STEM_MODES, so this is a direct port with no
+ * option dropped or invented.
+ */
+export function HearControl({
+  stemMode,
+  onStemModeChange,
+  alignEnd = false,
+}: {
+  stemMode: StemMode
+  onStemModeChange: (mode: StemMode) => void
+  // Pushes this control to the row's right edge (design: Video tab's HUD
+  // row has only Hear on the right; the Timeline tab's row already gets that
+  // push from the Onsets select ahead of it — see Timeline.tsx).
+  alignEnd?: boolean
+}) {
+  return (
+    <label className="control-select-label" style={alignEnd ? { marginLeft: 'auto' } : undefined}>
+      Hear
+      <select
+        className="control-select"
+        value={stemMode}
+        onChange={(e) => onStemModeChange(e.target.value as StemMode)}
+      >
+        {STEM_MODES.map((mode) => (
+          <option key={mode} value={mode}>
+            {STEM_MODE_LABELS[mode]}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }

@@ -236,7 +236,12 @@ def _analyze(audio_file, md5):
     import onset_detection
     import source_separation
 
-    stems = source_separation.separate(str(audio_file))
+    # progress_key=md5: audio_file is the extracted wav for a video track,
+    # not the source itself, so it hashes to something other than md5 (see
+    # _relocate_stems). Tracking progress under md5 explicitly is what lets
+    # get_analysis_progress below — which only ever knows the track's md5 —
+    # find this run.
+    stems = source_separation.separate(str(audio_file), progress_key=md5)
     source_separation.get_instrumental(stems)
 
     beats, downbeats = beat_detection.detect_beats(str(audio_file))
@@ -317,6 +322,30 @@ def get_analysis(track_id):
             if (cache_dir / (name + ".wav")).exists()
         ],
     }
+
+
+@app.get("/api/tracks/{track_id}/analysis/progress")
+def get_analysis_progress(track_id):
+    """Demucs' own live separation progress for this track, if it is running.
+
+    Meant to be polled (Song.tsx does, every ~400ms) alongside the /analysis
+    request above while that request is in flight, to drive a loading ring
+    off Demucs' real per-chunk progress rather than a simulated animation.
+    {"active": false} covers every case where there's nothing to show: a
+    cached track's near-instant reload never starts a Demucs run at all, and
+    a finished or not-yet-started run both read the same way. That is also
+    why this is its own endpoint rather than a field on /analysis: /analysis
+    doesn't return until the whole pipeline is done, so nothing polling it
+    could ever observe a run in progress.
+    """
+    import source_separation
+
+    source_file = _track_file(track_id)
+    md5 = _file_hash(source_file)
+    state = source_separation.get_progress(md5)
+    if state is None:
+        return {"active": False}
+    return {"active": True, "done": state["done"], "total": state["total"]}
 
 
 @app.get("/api/tracks/{track_id}/audio")

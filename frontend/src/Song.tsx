@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import Logo from './Logo'
 import Timeline from './Timeline'
 import VideoScreen from './VideoScreen'
 import { buildEightCountWindows } from './eightCount'
 import { useManualGrid, type ManualGridStore } from './manualGrid'
 import { useEngineTransport, useLoop, useSpeed } from './playback'
-import { API_BASE, snapTime, type SnapDirection } from './snap'
+import { API_BASE, DEFAULT_SNAP_MODE, snapTime, type SnapDirection, type SnapMode } from './snap'
 import { DEFAULT_STEM_MODE, StemEngine, loadStems, type StemMode } from './stemEngine'
 import { useTapSession } from './tapSession'
 import type { GridData, LibrarySong, OnsetData } from './types'
@@ -60,13 +61,111 @@ function onsetsFromAnalysis(a: Analysis): { onsets?: OnsetData; onsetsError?: st
 // engine, loop, speed, grid, or playhead state is keyed to it.
 type Screen = 'timeline' | 'video'
 
-export default function Song({ song, onExit }: { song: LibrarySong; onExit: () => void }) {
+// Shared by both of a song's loading paragraphs below — the slow server-side
+// analysis fetch (source separation + onset detection; minutes on a first
+// run) and the client-side stem decode that follows it — so the same cycling
+// status replaces both old static lines instead of just the first. Purely
+// cosmetic: neither step reports real progress, so this doesn't track actual
+// pipeline stage, just gives the wait something to look at. Each mount starts
+// back at index 0, so the sequence restarts when loading hands off to the
+// stem decode.
+const LOADING_MESSAGES = ['Loading timeline…', 'Separating stems…', 'Mapping onsets…']
+const LOADING_MESSAGE_INTERVAL_MS = 4000
+
+// Ring geometry for ProgressRing below. A module constant (not derived
+// inline per render) since both the SVG radius and the dasharray/dashoffset
+// math need the exact same circumference.
+const PROGRESS_RING_RADIUS = 24
+const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RING_RADIUS
+
+// Demucs' own separation progress, drawn as a ring that fills clockwise from
+// 12 o'clock. `fraction` is done/total straight off the backend's
+// /analysis/progress poll (see the progress effect in Song() below) — real
+// per-chunk completion, the same signal Demucs' own CLI bar reads from, not
+// a simulated animation. Purple to match the app's one accent color
+// (--color-accent), same hue as the active 8-count and the tap-mode buttons.
+function ProgressRing({ fraction }: { fraction: number }) {
+  const offset = PROGRESS_RING_CIRCUMFERENCE * (1 - fraction)
+  return (
+    <svg
+      className="progress-ring"
+      width="56"
+      height="56"
+      viewBox="0 0 56 56"
+      role="img"
+      aria-label={`${Math.round(fraction * 100)}% separated`}
+    >
+      <circle className="progress-ring-track" cx="28" cy="28" r={PROGRESS_RING_RADIUS} />
+      <circle
+        className="progress-ring-fill"
+        cx="28"
+        cy="28"
+        r={PROGRESS_RING_RADIUS}
+        strokeDasharray={PROGRESS_RING_CIRCUMFERENCE}
+        strokeDashoffset={offset}
+      />
+    </svg>
+  )
+}
+
+function LoadingStatus({
+  // Off for the stem decode: that step is client-side and normally fast, so
+  // the "couple minutes" warning belongs only to the slow server-side
+  // analysis fetch above it.
+  showSubtext = true,
+  // Demucs separation progress for a FRESH song. Left undefined for the stem
+  // decode's LoadingStatus (that step isn't Demucs — there's no real
+  // percentage to show) and stays null for a cached song's near-instant
+  // reload, since a cache hit never starts a Demucs run for the progress
+  // effect to observe. Either way, no `progress` means no ring: this is the
+  // one thing that decides whether the ring renders at all.
+  progress,
+}: {
+  showSubtext?: boolean
+  progress?: { done: number; total: number } | null
+}) {
+  const [index, setIndex] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(
+      () => setIndex((i) => (i + 1) % LOADING_MESSAGES.length),
+      LOADING_MESSAGE_INTERVAL_MS,
+    )
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <div className="song-loading">
+      {progress && progress.total > 0 && (
+        <ProgressRing fraction={Math.min(1, progress.done / progress.total)} />
+      )}
+      {/* Keyed by index so each message change is a fresh DOM node — that's
+          what makes .song-loading-message's CSS animation replay on every
+          swap instead of only once on the very first mount. */}
+      <p key={index} className="song-loading-message">
+        {LOADING_MESSAGES[index]}
+      </p>
+      {showSubtext && <p className="song-loading-subtext">This may take a couple minutes.</p>}
+    </div>
+  )
+}
+
+export default function Song({
+  song,
+  onExit,
+  darkMode,
+}: {
+  song: LibrarySong
+  onExit: () => void
+  darkMode: boolean
+}) {
   const trackId = song.id ?? undefined
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [engine, setEngine] = useState<StemEngine | null>(null)
   const [stemError, setStemError] = useState<string | null>(null)
+  // Demucs' live separation progress for the in-flight analysis fetch below;
+  // see the polling effect further down and ProgressRing/LoadingStatus above.
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   // The tapped grid for this audio — the only grid there is. Loaded in parallel
   // with the analysis (a tiny sidecar read against a slow pipeline), so it is
@@ -80,6 +179,7 @@ export default function Song({ song, onExit }: { song: LibrarySong; onExit: () =
     setLoading(true)
     setAnalysis(null)
     setError(null)
+    setProgress(null)
     fetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/analysis`)
       .then((res) => {
         if (!res.ok) throw new Error(`GET analysis -> HTTP ${res.status}`)
@@ -98,6 +198,34 @@ export default function Song({ song, onExit }: { song: LibrarySong; onExit: () =
       stale = true
     }
   }, [trackId])
+
+  // Polls Demucs' live separation progress while the analysis fetch above is
+  // in flight. A cached track's analysis returns before this ever observes
+  // {active: true} — that alone is what keeps the ring out of a cached
+  // reload, with no separate "is this cached" flag needed. Once a run does
+  // go active, `progress` is left at its last value on later {active: false}
+  // polls (rather than reset to null) so the ring doesn't blink out the
+  // moment Demucs finishes but analysis is still finishing up beat/onset
+  // detection behind it.
+  useEffect(() => {
+    if (!trackId || !loading) return
+    let stale = false
+    const poll = () => {
+      fetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/analysis/progress`)
+        .then((res) => (res.ok ? (res.json() as Promise<{ active: boolean; done?: number; total?: number }>) : null))
+        .then((data) => {
+          if (stale || !data || !data.active) return
+          setProgress({ done: data.done ?? 0, total: data.total ?? 0 })
+        })
+        .catch(() => {})
+    }
+    poll()
+    const timer = setInterval(poll, 400)
+    return () => {
+      stale = true
+      clearInterval(timer)
+    }
+  }, [trackId, loading])
 
   // Eager stem load: all five buffers fetched and decoded through the single
   // loadStems seam before any screen (and thus playback) exists. The abort +
@@ -143,32 +271,66 @@ export default function Song({ song, onExit }: { song: LibrarySong; onExit: () =
 
   const title = song.filename ?? song.id ?? song.md5
 
+  // The bottom pill nav is fixed (see index.css), so it never grows the
+  // document flow on its own; the scroll container's own bottom padding is
+  // measured off its real rendered height (+24px) instead of a guessed
+  // constant, so it stays correct across font/zoom/OS rendering differences.
+  const bottomTabsRef = useRef<HTMLDivElement>(null)
+  const [scrollBottomPad, setScrollBottomPad] = useState(0)
+  useLayoutEffect(() => {
+    const el = bottomTabsRef.current
+    if (!el) return
+    const update = () => setScrollBottomPad(el.offsetHeight + 24)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <main className="song">
-      <header className="song-head">
-        <button onClick={onExit}>← Library</button>
-        <h1>{title}</h1>
-      </header>
-      {error && <p className="error">{error}</p>}
-      {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
-      {stemError && <p className="error">Stems unavailable: {stemError}</p>}
-      {manual.error && <p className="error">Tapped grid: {manual.error}</p>}
-      {loading && <p>Analyzing {title}… (first run on a new track takes minutes)</p>}
-      {analysis && !engine && !stemError && (
-        <p>Loading stems… (decoding five buffers; sizes logged to console)</p>
-      )}
-      {engine && (
-        // Keyed by the engine so the shell's hoisted state is rebuilt exactly
-        // when the audio it describes is — never on a screen swap.
-        <SongShell
-          key={analysis?.id ?? song.md5}
-          engine={engine}
-          manual={manual}
-          onsets={onsets}
-          mediaKind={song.media_kind}
-          videoUrl={analysis?.video_url ?? null}
-        />
-      )}
+      <div className="song-scroll" style={{ paddingBottom: scrollBottomPad }}>
+        <header className="song-head">
+          <div className="song-head-left">
+            <button className="song-back" onClick={onExit} aria-label="Back to library">
+              ←
+            </button>
+            <h1>{title}</h1>
+          </div>
+          <Logo size={29} />
+        </header>
+        {error && <p className="error">{error}</p>}
+        {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
+        {stemError && <p className="error">Stems unavailable: {stemError}</p>}
+        {manual.error && <p className="error">Tapped grid: {manual.error}</p>}
+        {loading && <LoadingStatus progress={progress} />}
+        {analysis && !engine && !stemError && <LoadingStatus showSubtext={false} />}
+        {engine && (
+          // Keyed by the engine so the shell's hoisted state is rebuilt exactly
+          // when the audio it describes is — never on a screen swap.
+          <SongShell
+            key={analysis?.id ?? song.md5}
+            engine={engine}
+            manual={manual}
+            onsets={onsets}
+            mediaKind={song.media_kind}
+            videoUrl={analysis?.video_url ?? null}
+            darkMode={darkMode}
+          />
+        )}
+      </div>
+      {/* Design's "Library / [song name]" tab bar. Only "Library" actually
+          navigates (onExit) — the song tab is the current screen, shown
+          active/inert, not a jump-back-in-from-elsewhere control (that would
+          need "last open song" state App.tsx deliberately doesn't keep). */}
+      <nav className="song-bottom-tabs" ref={bottomTabsRef} aria-label="Navigate">
+        <button type="button" className="song-bottom-tab" onClick={onExit}>
+          Library
+        </button>
+        <button type="button" className="song-bottom-tab is-active" aria-current="page">
+          {title}
+        </button>
+      </nav>
     </main>
   )
 }
@@ -195,12 +357,14 @@ function SongShell({
   onsets,
   mediaKind,
   videoUrl,
+  darkMode,
 }: {
   engine: StemEngine
   manual: ManualGridStore
   onsets: OnsetData | undefined
   mediaKind: LibrarySong['media_kind']
   videoUrl: string | null
+  darkMode: boolean
 }) {
   const [screen, setScreen] = useState<Screen>('timeline')
   const [stemMode, setStemMode] = useState<StemMode>(DEFAULT_STEM_MODE)
@@ -239,14 +403,17 @@ function SongShell({
     [effectiveGrid, duration],
   )
 
-  // Loop points always snap to the beat — DIRECTIONALLY (the loop floors A
-  // and ceils B so it encloses whole musical units). There is no user-facing
-  // snap mode anymore; snapTime gracefully degrades to a plain clamp when
-  // there is no grid yet, which is what lets A/B default to the track's true
-  // start/end before a song has ever been tapped.
+  // The snap mode is picked by tapping either loop handle in either screen
+  // (see LoopBoundaryHandle) and lives here, once, so both screens' handles
+  // agree on what a tap changed. Whatever mode is active, the loop still
+  // snaps DIRECTIONALLY (floors A, ceils B) so it encloses whole musical
+  // units, and snapTime still degrades to a plain clamp when there is no
+  // grid yet, which is what lets A/B default to the track's true start/end
+  // before a song has ever been tapped.
+  const [snapMode, setSnapMode] = useState<SnapMode>(DEFAULT_SNAP_MODE)
   const snapToMode = useCallback(
-    (time: number, direction: SnapDirection) => snapTime(time, 'beat', effectiveGrid, duration, direction),
-    [effectiveGrid, duration],
+    (time: number, direction: SnapDirection) => snapTime(time, snapMode, effectiveGrid, duration, direction),
+    [snapMode, effectiveGrid, duration],
   )
   // The loop drives the ENGINE (native buffer-source looping). Same clock as
   // everything else, and one instance for every screen.
@@ -286,7 +453,10 @@ function SongShell({
           onsets={onsets}
           stemMode={stemMode}
           onStemModeChange={setStemMode}
+          snapMode={snapMode}
+          onSnapModeChange={setSnapMode}
           tap={tap}
+          darkMode={darkMode}
         />
       ) : (
         <VideoScreen
@@ -295,7 +465,11 @@ function SongShell({
           speed={speed}
           grid={effectiveGrid}
           windows={windows}
+          stemMode={stemMode}
+          onStemModeChange={setStemMode}
           videoUrl={videoUrl}
+          snapMode={snapMode}
+          onSnapModeChange={setSnapMode}
         />
       )}
     </>

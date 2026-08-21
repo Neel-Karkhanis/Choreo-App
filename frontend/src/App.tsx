@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Library from './Library'
 import Song from './Song'
+import { useDarkMode } from './theme'
 import type { LibrarySong } from './types'
 
 // The router, and nothing else. Two levels: the Library, and one open Song.
@@ -15,17 +16,22 @@ type View = { kind: 'library' } | { kind: 'song'; song: LibrarySong }
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: 'library' })
+  const { darkMode } = useDarkMode()
 
-  if (view.kind === 'song') {
-    return (
-      <Song
-        // Keyed by md5 so opening a different song is a fresh mount rather than
-        // a re-render that would hand the new song the old song's state.
-        key={view.song.md5}
-        song={view.song}
-        onExit={() => setView({ kind: 'library' })}
-      />
-    )
-  }
-  return <Library onOpen={(song) => setView({ kind: 'song', song })} />
+  return (
+    <>
+      {view.kind === 'song' ? (
+        <Song
+          // Keyed by md5 so opening a different song is a fresh mount rather
+          // than a re-render that would hand the new song the old song's state.
+          key={view.song.md5}
+          song={view.song}
+          onExit={() => setView({ kind: 'library' })}
+          darkMode={darkMode}
+        />
+      ) : (
+        <Library onOpen={(song) => setView({ kind: 'song', song })} />
+      )}
+    </>
+  )
 }

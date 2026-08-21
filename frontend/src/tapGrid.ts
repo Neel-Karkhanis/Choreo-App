@@ -81,7 +81,7 @@ function regress(idx: number[], t: number[]): { phase: number; period: number } 
  */
 export function fitTapGrid(taps: number[]): TapFitResult {
   if (taps.length < MIN_TAPS) {
-    return { ok: false, error: `Need at least ${MIN_TAPS} taps — you tapped ${taps.length}.` }
+    return { ok: false, error: `Need at least ${MIN_TAPS} taps (you tapped ${taps.length}).` }
   }
   const t = [...taps].sort((a, b) => a - b)
 
@@ -91,7 +91,7 @@ export function fitTapGrid(taps: number[]): TapFitResult {
   for (let i = 1; i < t.length; i++) gaps.push(t[i] - t[i - 1])
   const roughPeriod = median(gaps)
   if (!(roughPeriod > 0)) {
-    return { ok: false, error: 'Those taps all landed on the same instant — is the track playing?' }
+    return { ok: false, error: 'Those taps all landed on the same instant. Is the track playing?' }
   }
 
   // Index assignment is what makes the fit robust to human error: a SKIPPED
@@ -101,7 +101,7 @@ export function fitTapGrid(taps: number[]): TapFitResult {
 
   const first = regress(idx, t)
   if (!first || !(first.period > 0)) {
-    return { ok: false, error: 'Could not read a tempo from those taps — try again.' }
+    return { ok: false, error: 'Could not read a tempo from those taps. Try again.' }
   }
 
   // Outlier rejection doubles as the repair for a misfiled tap. `roughPeriod`
@@ -119,7 +119,7 @@ export function fitTapGrid(taps: number[]): TapFitResult {
   if (dropped / t.length > MAX_DROPPED_RATIO) {
     return {
       ok: false,
-      error: `Taps were too uneven — ${dropped} of ${t.length} missed the beat. Try again, and keep it steady.`,
+      error: `Taps were too uneven: ${dropped} of ${t.length} missed the beat. Try again, and keep it steady.`,
     }
   }
 
@@ -131,7 +131,7 @@ export function fitTapGrid(taps: number[]): TapFitResult {
     keep.map((i) => t[i]),
   )
   if (!refit || !(refit.period > 0)) {
-    return { ok: false, error: 'Could not read a tempo from those taps — try again.' }
+    return { ok: false, error: 'Could not read a tempo from those taps. Try again.' }
   }
 
   return {

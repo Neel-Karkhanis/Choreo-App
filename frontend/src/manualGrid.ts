@@ -126,7 +126,7 @@ export function useManualGrid(trackId: string | undefined): ManualGridStore {
         })
         .catch((err) => {
           publish(rollback)
-          setError(`${err} — tapped grid not saved`)
+          setError(`${err}: tapped grid not saved`)
         })
     },
     [trackId, publish],

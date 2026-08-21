@@ -1,11 +1,8 @@
 import { useCallback, useRef } from 'react'
-import { LOOP_BAND_EDGE, LOOP_BAND_FILL } from './playback'
+import LoopBoundaryHandle from './LoopBoundaryHandle'
+import { LOOP_BAND_FILL } from './playback'
 import type { LoopController, Transport } from './playback'
-
-// A small dead zone (in raw seconds) enforced around each handle so a drag
-// can never cross the other one — the same rule TimelineOverview's A/B
-// handles use, for the same reason (see there for the full rationale).
-const HANDLE_GAP_S = 0.05
+import type { SnapMode } from './snap'
 
 /**
  * A plain, YouTube-style scrub bar for the video screen — click or drag
@@ -13,16 +10,20 @@ const HANDLE_GAP_S = 0.05
  * waveform and no grid; it exists to answer "where am I / where are A and B",
  * not to read the music. Dragging the bar itself calls the same
  * transport.seek() the Timeline's minimap calls; dragging an A/B handle
- * calls loop.setLoopStart/setLoopEnd instead — the SAME calls
- * TimelineOverview's handles make, so the loop can never disagree between
- * the two screens.
+ * calls loop.setLoopStart/setLoopEnd instead, and tapping one opens the same
+ * snap-mode menu — the SAME LoopBoundaryHandle TimelineOverview renders, so
+ * the loop and its snap mode can never disagree between the two screens.
  */
 export default function VideoScrubber({
   transport,
   loop,
+  snapMode,
+  onSnapModeChange,
 }: {
   transport: Transport
   loop: LoopController
+  snapMode: SnapMode
+  onSnapModeChange: (mode: SnapMode) => void
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
 
@@ -70,29 +71,18 @@ export default function VideoScrubber({
         <div className="video-scrubber-played" style={{ width: `${playedPct}%` }} />
         <div className="video-scrubber-thumb" style={{ left: `${playedPct}%` }} />
         {(['a', 'b'] as const).map((which) => (
-          <div
+          <LoopBoundaryHandle
             key={which}
+            which={which}
             className={`video-scrubber-handle video-scrubber-handle-${which}`}
-            role="slider"
-            aria-label={which === 'a' ? 'Loop start' : 'Loop end'}
-            aria-valuemin={0}
-            aria-valuemax={duration}
-            aria-valuenow={which === 'a' ? loop.start : loop.end}
-            style={{ left: `${which === 'a' ? aPct : bPct}%`, background: LOOP_BAND_EDGE }}
-            onPointerDown={(e) => {
-              e.stopPropagation()
-              e.currentTarget.setPointerCapture(e.pointerId)
-            }}
-            onPointerMove={(e) => {
-              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-              e.stopPropagation()
-              const t = timeAtClientX(e.clientX)
-              if (which === 'a') loop.setLoopStart(Math.min(t, loop.end - HANDLE_GAP_S))
-              else loop.setLoopEnd(Math.max(t, loop.start + HANDLE_GAP_S))
-            }}
-          >
-            {which.toUpperCase()}
-          </div>
+            leftPct={which === 'a' ? aPct : bPct}
+            time={which === 'a' ? loop.start : loop.end}
+            duration={duration}
+            loop={loop}
+            timeAtClientX={timeAtClientX}
+            snapMode={snapMode}
+            onSnapModeChange={onSnapModeChange}
+          />
         ))}
       </div>
     </div>

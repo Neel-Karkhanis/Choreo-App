@@ -1,6 +1,160 @@
+/* ---------------------------------------------------------------------------
+   Design tokens (design/handoff/README.md -> "Design Tokens"). Light-mode
+   colors live on :root; dark mode overrides them under
+   :root[data-theme="dark"] (see theme.ts, which sets that attribute on
+   <html>). Colors marked "fixed" are identical in both themes, so they are
+   declared once on :root and never overridden. Typography and spacing/shape
+   tokens are defined here too so a future pass has one scale to read, but
+   nothing below yet consumes them — this pass only wires up theming and
+   swaps existing hardcoded colors for token references; see the commit
+   message for exactly which literals were and were not touched, and why.
+
+   The blocks below marked "invented" do not come from the design at all —
+   they're the Timeline's own canvas/region palette (8-count shading, beat
+   grid, active-block highlight, onset markers, stem waveform coloring, loop
+   band), promoted from hardcoded literals in Timeline.tsx/playback.ts into
+   tokens here so dark mode can vary them too. Light-mode values are exactly
+   the prior literals (zero visual change there); dark-mode values are new,
+   chosen to preserve the same relative hierarchy against a dark background
+   (see Timeline.tsx's own layer comments for what that hierarchy is).
+   --------------------------------------------------------------------------- */
+:root {
+  /* Colors -- light mode */
+  --color-page-bg: oklch(0.98 0.002 90);
+  --color-text: oklch(0.2 0.005 90);
+  --color-card-bg: white;
+  --color-card-border: oklch(0.91 0.003 90);
+  --color-chip-bg: oklch(0.94 0.003 90);
+  --color-input-bg: white;
+  --color-input-border: oklch(0.85 0.003 90);
+  --color-muted-text: oklch(0.55 0.005 90);
+  --color-divider: oklch(0.88 0.003 90);
+
+  /* Colors -- fixed (same value in both themes) */
+  --color-accent: #9333ea;
+  --color-status-counted: oklch(0.6 0.13 155);
+  --color-status-needs-counting: oklch(0.65 0.1 80);
+  --color-needs-counting-text: oklch(0.5 0.1 80);
+  /* Both re-hued more than once at the user's explicit request (design
+     originally had A green/B yellow); current: A yellow, B red. Each swap
+     keeps its token's own lightness/chroma and only moves the hue, so the
+     two stay visually distinct weight-classes (A lighter/pastel at
+     0.86/0.15, B a touch darker/more saturated at 0.72/0.15) regardless of
+     which hue either carries. Everything downstream (LoopBoundaryHandle's
+     pins, playback.ts's LOOP_BAND_EDGE_A/B marker on the main timeline,
+     TimelineOverview, VideoScrubber) reads these same two tokens, so a hue
+     change here applies everywhere in one edit. */
+  --color-loop-pin-a: oklch(0.86 0.15 95);
+  --color-loop-pin-b: oklch(0.72 0.15 25);
+  --color-onset-bass: oklch(0.5 0.18 260);
+  /* Design/handoff/README.md calls this red (see Timeline.tsx's onset-marker
+     comment) -- re-hued more than once since, at the user's explicit
+     request, a deliberate deviation from that mock; current: green. Hue
+     only; lightness/chroma (0.55/0.2) carried over unchanged throughout, so
+     it keeps the same visual weight against the waveform as bass's onset
+     marker regardless of which hue it carries. */
+  --color-onset-drums: oklch(0.55 0.2 145);
+  --color-import-button-bg: oklch(0.22 0.01 90);
+  /* Video surface backdrop (design/handoff/README.md "Video tab"): a fixed
+     near-black regardless of theme, like a real video player's letterbox. */
+  --color-video-surface-bg: oklch(0.15 0.005 90);
+  /* Translucent accent wash for the always-on loop region; a single alpha
+     works in both themes since it blends with whatever page/card is under
+     it rather than needing its own light/dark pair. */
+  --color-loop-band-fill: rgba(147, 51, 234, 0.16);
+
+  /* Colors -- Timeline canvas/region palette (invented, light mode) */
+  --color-waveform: oklch(0.62 0.005 90);
+  /* The active 8-count reads as the accent purple (same hue as
+     --color-accent/--color-loop-band-fill); every other 8-count is plain
+     grey via --color-eight-count-shade below. */
+  --color-active-block-fill: rgba(147, 51, 234, 0.18);
+  --color-active-block-border: rgba(147, 51, 234, 0.65);
+  --color-subdivision-tick: rgba(120, 120, 120, 0.3);
+  --color-beat-tick: rgba(110, 110, 110, 0.55);
+  --color-downbeat-tick: rgba(40, 40, 40, 0.85);
+  --color-eight-count-shade: rgba(110, 110, 110, 0.1);
+  --color-tap-marker: rgba(20, 150, 60, 0.9);
+  /* Dark slate, shared by the 1..8 count digits and "&" subdivision labels
+     (Timeline.tsx's COUNT_LABEL_STYLE/SUBDIVISION_LABEL_STYLE) and the
+     "phrase X · count Y" transport readout (.readout-count) — split off from
+     --color-needs-counting-text so restyling these doesn't also recolor the
+     Library's unrelated "Needs counting" note, which keeps sharing that
+     amber token on its own. */
+  --color-count-label-text: oklch(0.32 0.02 250);
+  --color-stem-vocals: oklch(0.6 0.14 340);
+  --color-stem-instrumental: oklch(0.55 0.12 200);
+
+  /* Typography */
+  --font-family-base: -apple-system, BlinkMacSystemFont, 'SF Pro Display', Helvetica, Arial,
+    sans-serif;
+  --font-wordmark-size: 21px;
+  --font-wordmark-weight: 700;
+  --font-wordmark-tracking: -0.02em;
+  --font-song-title-size: 15px;
+  --font-song-title-weight: 700;
+  --font-song-title-tracking: -0.01em;
+  --font-row-title-size: 14px;
+  --font-row-title-weight: 600;
+  --font-row-note-size: 10px;
+  --font-row-note-weight: 600;
+  --font-row-note-tracking: 0.02em;
+  --font-tab-size: 11px;
+  --font-tab-weight: 600;
+  --font-button-size: 12px;
+  --font-button-weight: 600;
+
+  /* Spacing / shape */
+  --radius-card: 12px;
+  --radius-pill: 980px;
+  --radius-input: 8px;
+  --size-status-dot: 7px;
+  --size-loop-pin: 14px;
+  --size-scrubber-playhead: 11px;
+  --space-row-padding: 9px 6px;
+  --border-width-row-divider: 1.15px;
+  --space-card-padding: 22px;
+  --space-card-divider-margin: 20px -22px;
+}
+
+:root[data-theme='dark'] {
+  --color-page-bg: oklch(0.18 0.006 290);
+  --color-text: oklch(0.95 0.004 90);
+  --color-card-bg: oklch(0.24 0.008 290);
+  --color-card-border: oklch(0.34 0.012 290);
+  --color-chip-bg: oklch(0.28 0.01 290);
+  --color-input-bg: oklch(0.26 0.009 290);
+  --color-input-border: oklch(0.4 0.012 290);
+  --color-muted-text: oklch(0.68 0.008 90);
+  --color-divider: oklch(0.36 0.012 290);
+
+  /* Colors -- Timeline canvas/region palette (invented, dark mode). Ticks and
+     labels move LIGHTER (a dark background needs a brighter foreground to
+     read at the same weight); the 8-count shade and active-block fill stay
+     translucent low-opacity washes so they don't overpower the waveform. */
+  --color-waveform: oklch(0.55 0.006 90);
+  /* Same accent purple as light mode's active-block fill, slightly more
+     opaque; the border brightens toward the accent's lighter end so it
+     doesn't get lost against a dark card, same reasoning as the tick colors
+     above. */
+  --color-active-block-fill: rgba(147, 51, 234, 0.28);
+  --color-active-block-border: rgba(191, 132, 246, 0.85);
+  --color-subdivision-tick: rgba(190, 190, 190, 0.35);
+  --color-beat-tick: rgba(180, 180, 180, 0.6);
+  --color-downbeat-tick: rgba(235, 235, 235, 0.9);
+  --color-eight-count-shade: rgba(200, 200, 200, 0.08);
+  --color-tap-marker: rgba(60, 200, 100, 0.9);
+  /* Lighter slate in dark mode, same reasoning as the tick colors above. */
+  --color-count-label-text: oklch(0.78 0.02 250);
+  --color-stem-vocals: oklch(0.68 0.13 340);
+  --color-stem-instrumental: oklch(0.65 0.12 200);
+}
+
 body {
   font-family: system-ui, sans-serif;
   margin: 2rem;
+  background-color: var(--color-page-bg);
+  color: var(--color-text);
 }
 
 ul {
@@ -18,8 +172,15 @@ li {
 
 /* The overall timeline: a plain whole-song position bar with draggable A/B
    loop handles — not a waveform view. Padded so the round handles don't clip
-   at the track's own left/right edges when A is at 0 or B is at duration. */
+   at the track's own left/right edges when A is at 0 or B is at duration.
+   Positioned with an explicit z-index so it (and the snap-mode menu nested
+   in its handles) forms its own stacking context above the controls row
+   below: those buttons are flex items, which paint as if positioned even
+   without a position/z-index of their own, and would otherwise win the
+   overlap against the menu despite sitting later in source order. */
 .timeline-overview {
+  position: relative;
+  z-index: 1;
   margin-top: 4px;
   padding: 0 9px;
 }
@@ -40,7 +201,7 @@ li {
   right: 0;
   height: 4px;
   border-radius: 2px;
-  background-color: #ddd;
+  background-color: var(--color-card-border);
   pointer-events: none;
 }
 
@@ -70,38 +231,156 @@ li {
   pointer-events: none;
 }
 
-.timeline-overview-handle {
+/* Loop A/B pin, split into two boxes (Prompt 8, touch pass):
+   .loop-pin-hit is the 44x44 invisible HIT TARGET — design/handoff/
+   README.md's 14px pin is well under the WCAG/Apple/Google touch-target
+   floor on its own — and .loop-pin-dot is the ONE visual definition shared
+   by both the minimap (TimelineOverview) and the video scrubber overlay
+   (VideoScrubber): same 14px circle, same drop shadow, same label
+   typography (design/handoff/README.md: "the same 14px A/B loop pins... as
+   the minimap" — the design's own markup uses byte-for-byte identical
+   inline styles in both spots). LoopBoundaryHandle is the single component
+   both screens render; this is its single CSS definition. The
+   context-specific classes each screen still passes
+   (.timeline-overview-handle-*, .video-scrubber-handle-*) are unstyled
+   hooks only, never a second visual spec to drift out of sync with this
+   one. */
+.loop-pin-hit {
   position: absolute;
   top: 50%;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
+  width: 44px;
+  height: 44px;
   transform: translate(-50%, -50%);
   cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  font-size: 10px;
-  font-weight: 700;
-  box-shadow: 0 0 0 2px white;
   touch-action: none;
 }
 
-.timeline-overview-handle:active {
+.loop-pin-hit:active {
   cursor: grabbing;
+}
+
+.loop-pin-dot {
+  position: relative; /* anchors .loop-snap-menu, which must track this 14px
+                          visual dot, not the 44px invisible hit box above */
+  width: var(--size-loop-pin);
+  height: var(--size-loop-pin);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  /* design/handoff/README.md: "14px circle with drop shadow" — a fixed
+     value in both themes in the design itself (not a var() there either),
+     so ported literally rather than tokenized. */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* The Timeline card (design/handoff/README.md "2. Practice / Song" -> Timeline
+   tab): waveform, minimap, and controls row live inside this single bordered/
+   padded card. Only the card chrome is styled here — the wavesurfer instance
+   mounted into the plain child <div> and TimelineOverview (the minimap) are
+   untouched by this rule; they paint themselves. */
+.timeline {
+  background-color: var(--color-card-bg);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-card-padding);
+  box-sizing: border-box;
+}
+
+/* Full-bleed divider between the waveform and the minimap/controls beneath
+   it — negative horizontal margin cancels the card's own padding so it runs
+   edge-to-edge within the card. */
+.timeline-card-divider {
+  height: 1px;
+  background-color: var(--color-divider);
+  margin: var(--space-card-divider-margin);
 }
 
 .timeline-controls {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
+  gap: 8px;
+  margin-top: 9px;
+  flex-wrap: wrap;
 }
 
-/* Shared by the Onset and Hear dropdowns: each collapses a row of related
-   toggles behind one button so the controls row doesn't grow with every stem
-   this app learns to detect. */
+/* Shared "Onsets"/"Hear" control: a label wrapping a native <select>, styled
+   to the design's input chrome. A native select is what lets the Onsets
+   options carry per-option color (see Timeline.tsx) with no extra markup. */
+.control-select-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-muted-text);
+}
+
+.control-select {
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  color: inherit;
+  padding: 4px 7px;
+  border-radius: var(--radius-input);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.control-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Circular bordered transport button, shared by the Timeline and Video HUD
+   controls rows. */
+.play-pause-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+}
+
+.play-pause-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Speed dial trigger: the picker it opens (.dropdown-list-speed) is
+   unstyled-by-this-pass on purpose — only the button's active/inactive look
+   is specified by the design. */
+.speed-dial-button {
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-muted-text);
+  padding: 6px;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* Shared by every remaining button-triggered menu (Speed, and the loop
+   handles' snap-mode menu) — Onset/Hear are now plain <select>s (see
+   .control-select above) and no longer need this. */
 .dropdown {
   position: relative;
 }
@@ -116,8 +395,8 @@ li {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  background-color: white;
-  border: 1px solid #ccc;
+  background-color: var(--color-card-bg);
+  border: 1px solid var(--color-input-border);
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
@@ -128,6 +407,21 @@ li {
   width: 220px;
 }
 
+/* The snap-mode menu opened by TAPPING (not dragging) a loop A/B handle — see
+   LoopBoundaryHandle. It nests inside the handle's own round, absolutely
+   positioned div, so it reuses .dropdown-list's box but re-centers under the
+   handle instead of hanging off its left edge, and resets the handle's own
+   grab cursor for its buttons. */
+.loop-snap-menu {
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  z-index: 20;
+  cursor: default;
+  white-space: nowrap;
+}
+
 .dropdown-list-speed input[type='range'] {
   width: 100%;
 }
@@ -136,40 +430,82 @@ li {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
-  color: #666;
+  color: var(--color-muted-text);
   padding: 0 2px;
 }
 
-/* Tap mode's own hue: green, used nowhere else in the app. */
+/* Re-tap's own hue: the app's accent purple (--color-accent), same one
+   used for the active 8-count block and loop band elsewhere. Pill/"bubble"
+   shaped like .import-button (--radius-pill), at the user's explicit
+   request, rather than the plain rectangular default button chrome it had
+   before -- border dropped since a filled pill needs no outline of its own. */
 .tap-enter {
-  background-color: rgb(20, 130, 60);
-  border-color: rgb(20, 130, 60);
+  background-color: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-pill);
   color: white;
+  padding: 6px 14px;
+  font-size: var(--font-button-size);
+  font-weight: var(--font-button-weight);
+  cursor: pointer;
 }
 
+/* Tap-counting panel (design/handoff/README.md "Tap-counting panel"): a
+   MULTI-TAP capture flow, not a single-tap re-phase — tapSession.ts collects
+   a live taps[] array while the user taps every count against the playing
+   audio, tapGrid.ts least-squares-fits a tempo+phase line through them once
+   MIN_TAPS (16) have landed, and the fitted line becomes the song's whole
+   beat/downbeat/eight-count grid. That IS the feature the design describes
+   ("Tap on the 1, then every count you feel", a 16-tap minimum, a progress
+   bar) — TapOverlay.tsx's instruction copy is already nearly verbatim the
+   mock's. What does NOT match is the control surface: the design has ONE
+   button whose fill toggles idle(accent)/active(grey) and doubles as both
+   "start" and "confirm". The real panel has no idle state to toggle from —
+   it only ever renders while a session is already open (Timeline.tsx's
+   `tap.tapping &&`) — and three independent controls instead of one: the pad
+   itself (where taps are physically recorded), "Accept" (enabled once
+   MIN_TAPS is reached), and Restart/"Start over". Per this prompt's brief,
+   ONLY container/color/typography change below — none of that control flow
+   is touched. The accent-filled treatment lands on "Accept" (the real
+   primary/affirmative action) driven by its own real enabled/disabled state;
+   that is the closest actual state this panel has to the mock's idle/active
+   toggle, not a recreation of it. Entering tap mode ("Re-tap the count") is
+   a different control living outside this panel, in Timeline.tsx's controls
+   row (.tap-enter, above) — out of scope for "the tap-counting panel". */
 .tap-panel {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  border: 2px solid rgb(20, 130, 60);
-  border-radius: 6px;
-  background-color: rgba(20, 150, 60, 0.06);
+  box-sizing: border-box;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1.5px solid var(--color-accent);
+  border-radius: var(--radius-card);
+  background-color: color-mix(in oklab, var(--color-accent) 6%, var(--color-card-bg));
 }
 
 .tap-panel-head {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  margin-bottom: 0.5rem;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tap-panel-head strong {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .tap-hint {
-  font-size: 0.85rem;
-  color: #555;
+  font-size: 11px;
+  color: var(--color-muted-text);
 }
 
-/* The tap target. Big and finger-sized because this is mobile-first and every
-   missed press is a corrupted measurement. touch-action/user-select off so a
-   fast repeated tap can't start a scroll, a zoom, or a text selection. */
+/* The tap target itself has no design equivalent — the mock's panel has no
+   live per-tap capture surface at all, so this keeps its existing shape and
+   is only moved onto the one accent token the rest of the redesign uses, in
+   place of its old hardcoded green. Big and finger-sized because this is
+   mobile-first and every missed press is a corrupted measurement.
+   touch-action/user-select off so a fast repeated tap can't start a scroll,
+   a zoom, or a text selection. */
 .tap-pad {
   display: flex;
   flex-direction: column;
@@ -177,9 +513,10 @@ li {
   justify-content: center;
   gap: 0.2rem;
   min-height: 6.5rem;
-  border-radius: 6px;
-  border: 2px dashed rgb(20, 130, 60);
-  background-color: rgba(20, 150, 60, 0.1);
+  border-radius: var(--radius-input);
+  /* Solid, not dashed, at the user's explicit request. */
+  border: 2px solid var(--color-accent);
+  background-color: color-mix(in oklab, var(--color-accent) 10%, transparent);
   cursor: pointer;
   touch-action: none;
   user-select: none;
@@ -188,243 +525,534 @@ li {
 }
 
 .tap-pad[data-armed='false'] {
-  border-color: #999;
-  background-color: rgba(120, 120, 120, 0.1);
+  border-color: var(--color-input-border);
+  background-color: var(--color-chip-bg);
   cursor: default;
 }
 
 .tap-pad:active[data-armed='true'] {
-  background-color: rgba(20, 150, 60, 0.28);
+  background-color: color-mix(in oklab, var(--color-accent) 22%, transparent);
 }
 
 .tap-pad-count {
   font-size: 2.5rem;
   font-weight: 700;
   line-height: 1;
-  color: rgb(16, 100, 45);
+  color: var(--color-accent);
   font-variant-numeric: tabular-nums;
 }
 
 .tap-pad-label {
-  font-size: 0.85rem;
-  color: #444;
+  font-size: 11px;
+  color: var(--color-muted-text);
+}
+
+/* Replaces the pad's old "Press Play, then tap each count" copy while
+   paused, at the user's explicit request — an actual play control instead of
+   an instruction to go find one elsewhere. 48px is comfortably past the
+   44x44 touch-target floor on its own, so unlike the smaller controls in the
+   Prompt 8 touch pass below, this needs no separate ::after hit-slop. */
+.tap-pad-play {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--color-accent);
+  color: white;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Same optical-centering nudge as .play-pause-button: the ▶ glyph's ink
+     sits left-of-center in its box. */
+  padding: 0 0 0 2px;
+  cursor: pointer;
+}
+
+.tap-pad-play:active {
+  opacity: 0.7;
 }
 
 .tap-progress {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--color-muted-text);
 }
 
+/* The design's progress bar is a static, never-filled div (its own mock
+   hardcodes width:0%). The app's is a real native <progress>, already fed
+   the live tap count — restyled to the design's thin rounded accent-filled
+   look rather than replaced with a div, so it keeps reflecting real
+   progress instead of becoming decorative. */
 .tap-progress progress {
   flex: 1 1 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  border: none;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
 }
 
-.tap-note {
-  margin: 0.35rem 0 0;
-  font-size: 0.85rem;
-  color: #6a5200;
+.tap-progress progress::-webkit-progress-bar {
+  background-color: var(--color-card-border);
+  border-radius: 3px;
 }
 
-.tap-fit {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  margin-top: 0.35rem;
-  font-size: 0.9rem;
+.tap-progress progress::-webkit-progress-value {
+  background-color: var(--color-accent);
+  border-radius: 3px;
+}
+
+.tap-progress progress::-moz-progress-bar {
+  background-color: var(--color-accent);
+  border-radius: 3px;
 }
 
 .tap-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.5rem;
-  font-size: 0.9rem;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 11px;
 }
 
-.tap-accept {
-  background-color: rgb(20, 130, 60);
-  border-color: rgb(20, 130, 60);
+.tap-actions button {
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  color: inherit;
+  padding: 6px 12px;
+  border-radius: var(--radius-input);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* "Accept" — see this block's header comment for why this, specifically,
+   is where the design's accent-filled/grey button treatment lands. Qualified
+   with .tap-actions (rather than bare .tap-accept) so this beats the plain
+   ".tap-actions button" rule above on specificity, not just source order —
+   a bare class selector there is otherwise equal-or-lower specificity and
+   would lose the background/border/color it's meant to override. */
+.tap-actions .tap-accept {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
   color: white;
 }
 
-.tap-accept:disabled {
-  background-color: #ccc;
-  border-color: #ccc;
-  color: #666;
+.tap-actions .tap-accept:disabled {
+  background-color: var(--color-input-border);
+  border-color: var(--color-input-border);
+  color: var(--color-muted-text);
+  cursor: default;
 }
 
 /* ---------------------------------------------------------------------------
    App shell: Library (level 1) -> Song (level 2) -> screens.
-   Desktop only, deliberately: no responsive or touch work in this pass.
+   Touch-verified at 380px as of Prompt 8 (touch pass) — see the bottom of
+   this file for that pass's own additions (hit-slop, press states,
+   double-tap-zoom/pull-to-refresh prevention). Still no responsive layout
+   work: single fixed layout, no breakpoints.
    --------------------------------------------------------------------------- */
 
-.library-head,
+/* The scroll container: everything but the fixed bottom pill nav lives here.
+   Its bottom padding is measured off the nav's own rendered height (see
+   Song.tsx) so the nav never overlaps the end of the content. */
+.song-scroll {
+  width: 100%;
+  margin-top: 25px;
+  box-sizing: border-box;
+}
+
+/* The rotating "Loading timeline… / Separating stems… / Mapping onsets…"
+   status shown during both of a song's loading steps (Song.tsx's
+   LoadingStatus). Its own p+p rather than a single line so the subtext can
+   sit visibly smaller/muted below the main message. Fixed + centered on the
+   viewport (not just horizontally, and not wherever it happens to fall in
+   the scroll flow under the header) at the user's explicit request.
+   pointer-events:none so it never blocks the header's back button sitting
+   underneath it. */
+.song-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.song-loading p {
+  margin: 0;
+}
+
+/* Shown above the message only while Song.tsx has real Demucs progress to
+   report (a fresh, uncached song) — see LoadingStatus/ProgressRing there.
+   Rotated -90deg so the fill starts at 12 o'clock and sweeps clockwise, the
+   usual reading direction for a ring like this. Purple via --color-accent,
+   the app's one accent color, same hue as the active 8-count block and the
+   tap-mode buttons. */
+.progress-ring {
+  margin-bottom: 14px;
+  transform: rotate(-90deg);
+}
+
+.progress-ring-track {
+  fill: none;
+  stroke: var(--color-divider);
+  stroke-width: 4;
+}
+
+.progress-ring-fill {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  /* Ticks in whole-chunk steps off the poll (see Song.tsx), not continuously,
+     so this eases each jump into a smooth sweep instead of a visible snap. */
+  transition: stroke-dashoffset 0.3s ease;
+}
+
+/* Each message swap remounts this <p> (React key={index} in Song.tsx's
+   LoadingStatus), which retriggers this animation on every change — a soft
+   crossfade/rise rather than the text just snapping to the next word. */
+.song-loading-message {
+  animation: song-loading-message-in 0.5s ease both;
+}
+
+@keyframes song-loading-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.song-loading p.song-loading-subtext {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-muted-text);
+}
+
 .song-head {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.library-head h1,
+.song-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.song-back {
+  border: none;
+  background: none;
+  color: var(--color-muted-text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px;
+  flex: none;
+}
+
 .song-head h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--font-song-title-size);
+  font-weight: var(--font-song-title-weight);
+  letter-spacing: var(--font-song-title-tracking);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.library-head > div:last-child {
-  margin-left: auto;
+/* Bottom-fixed floating pill nav (design/handoff/README.md: "position:
+   absolute; bottom:24px" relative to the device frame). The real app has no
+   device frame, so this is the fixed-to-viewport equivalent — same always-
+   visible result, without the frame's fixed-height/overflow:auto scaffolding. */
+.song-bottom-tabs {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background-color: var(--color-chip-bg);
+  padding: 3px;
+  border-radius: var(--radius-card);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  z-index: 50;
+}
+
+.song-bottom-tab {
+  border: none;
+  background: transparent;
+  color: var(--color-muted-text);
+  padding: 6px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 45vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-bottom-tab.is-active {
+  background-color: var(--color-card-bg);
+  color: inherit;
+  cursor: default;
+}
+
+/* Library (design/handoff/README.md "1. Library"): 85%-wide centered column,
+   header row with logo+wordmark left / import pill right, then a flush list
+   of bottom-divided rows. */
+.library {
+  width: 85%;
+  margin: 25px auto 0;
+}
+
+.library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.library-brand {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.library-wordmark {
+  margin: 0;
+  font-size: var(--font-wordmark-size);
+  font-weight: var(--font-wordmark-weight);
+  letter-spacing: var(--font-wordmark-tracking);
+}
+
+.import-button {
+  border: none;
+  background-color: var(--color-import-button-bg);
+  color: white;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-button-size);
+  font-weight: var(--font-button-weight);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.import-button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .song-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
 }
 
+.song-list li {
+  margin: 0;
+}
+
+/* Whole row is a <button> (not a div with onClick) so it's keyboard-reachable
+   and gets Enter/Space activation for free. Visual padding stays exactly
+   9px/6px per the design; min-height extends the hit area to the 44px
+   touch-target floor without changing that visual padding — rows whose
+   content is shorter than 44px just center within the extra room. */
 .song-row {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid #ddd;
-  border-left: 4px solid #bbb;
-  border-radius: 4px;
-}
-
-/* State is carried by the left edge as well as the badge: an evicted row has
-   to be distinguishable at a glance without being hidden. */
-.song-row.is-ready {
-  border-left-color: rgb(20, 130, 60);
-}
-
-.song-row.is-needs_tap {
-  border-left-color: rgb(200, 150, 20);
-}
-
-.song-row.is-stems_evicted {
-  border-left-color: #999;
-  background-color: #fafafa;
-}
-
-.song-row-main {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-}
-
-.song-open {
-  font-size: 1rem;
-  font-weight: 600;
-  background: none;
+  align-items: center;
+  gap: 12px;
+  padding: var(--space-row-padding);
   border: none;
-  padding: 0;
-  cursor: pointer;
-  color: #1a4f8a;
+  border-bottom: var(--border-width-row-divider) solid
+    color-mix(in oklab, var(--color-accent) 45%, var(--color-card-border));
+  background: none;
+  color: inherit;
+  font: inherit;
   text-align: left;
+  cursor: pointer;
 }
 
-.song-open:disabled {
-  color: #777;
+.song-row:disabled {
   cursor: not-allowed;
 }
 
-.song-state {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.4rem;
-  border-radius: 3px;
-  background-color: #eee;
-  color: #444;
+.song-row:disabled .song-title {
+  color: var(--color-muted-text);
 }
 
-.song-state.is-ready {
-  background-color: rgba(20, 150, 60, 0.15);
-  color: rgb(15, 95, 45);
+.song-dot {
+  width: var(--size-status-dot);
+  height: var(--size-status-dot);
+  border-radius: 50%;
+  flex: none;
 }
 
-.song-state.is-needs_tap {
-  background-color: rgba(250, 200, 40, 0.25);
-  color: rgb(130, 95, 0);
+.song-dot[data-state='ready'] {
+  background-color: var(--color-status-counted);
 }
 
-.song-state.is-stems_evicted {
-  background-color: #e4e4e4;
-  color: #555;
+.song-dot[data-state='needs_tap'] {
+  background-color: var(--color-status-needs-counting);
 }
 
-.song-kind {
-  font-size: 0.75rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 3px;
-  background-color: rgba(20, 150, 150, 0.15);
-  color: rgb(0, 100, 105);
+/* Third dot color: the design only defines counted/needs-counting. No design
+   equivalent exists for stems_evicted, so it borrows the theme's muted-text
+   color rather than inventing a new fixed hue the design never specified. */
+.song-dot[data-state='stems_evicted'] {
+  background-color: var(--color-muted-text);
 }
 
-.song-duration {
-  font-size: 0.85rem;
-  color: #666;
-  font-variant-numeric: tabular-nums;
-  margin-left: auto;
+.song-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.song-title {
+  display: block;
+  font-size: var(--font-row-title-size);
+  font-weight: var(--font-row-title-weight);
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .song-note {
-  margin: 0.35rem 0 0;
-  font-size: 0.85rem;
-  color: #555;
-  max-width: 70ch;
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-row-note-size);
+  font-weight: var(--font-row-note-weight);
+  letter-spacing: var(--font-row-note-tracking);
+  color: var(--color-muted-text);
+}
+
+.song-note[data-tone='amber'] {
+  color: var(--color-needs-counting-text);
 }
 
 .song-note code {
-  background-color: #eee;
+  background-color: var(--color-chip-bg);
   padding: 0 0.2rem;
   border-radius: 2px;
 }
 
-/* Screen swap. Audio songs never render this — one screen, no tabs. */
+.song-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.song-kind-flag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-muted-text);
+}
+
+.song-duration {
+  font-size: 12px;
+  color: var(--color-muted-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Screen swap: centered pill/chip segmented control. Audio songs never
+   render this — one screen, no tabs. */
 .screen-tabs {
   display: flex;
-  gap: 0.25rem;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid #ddd;
+  gap: 2px;
+  width: fit-content;
+  margin: 0 auto 12px;
+  background-color: var(--color-chip-bg);
+  padding: 2px;
+  border-radius: var(--radius-input);
 }
 
 .screen-tab {
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
-  background: none;
-  padding: 0.35rem 0.9rem;
+  border: none;
+  background: transparent;
+  color: var(--color-muted-text);
+  padding: 4px 11px;
+  border-radius: 6px;
+  font-size: var(--font-tab-size);
+  font-weight: var(--font-tab-weight);
   cursor: pointer;
 }
 
 .screen-tab.is-active {
-  border-color: #ddd;
-  background-color: white;
-  font-weight: 600;
-  margin-bottom: -1px;
+  background-color: var(--color-card-bg);
+  color: inherit;
 }
 
-/* The real video pane: fills the available width, letterboxed on a black
-   background so any source aspect ratio sits centered without distortion. */
+/* The video surface (design/handoff/README.md "Video tab"): a fixed 16:9 box
+   that hosts either the real <video> or the no-video placeholder, plus the
+   scrubber/pin/fullscreen overlay — all positioned absolutely against THIS
+   element rather than the <video> itself, so they stay put regardless of the
+   video's own aspect ratio or letterboxing. */
+/* No overflow:hidden here on purpose: a loop pin's snap-mode menu
+   (.loop-snap-menu) opens BELOW its pin, and both A/B pins sit right at this
+   box's bottom edge (inside the scrubber overlay) — clipping overflow would
+   cut the menu invisibly rather than just visually crop it. Corners are
+   rounded on the video/placeholder children themselves instead (see
+   .video-pane / .video-pane-empty below), so the letterboxed video still
+   reads as one rounded 16:9 surface without needing the clip. */
+.video-surface {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: var(--color-video-surface-bg);
+  border-radius: var(--radius-card);
+}
+
+/* The real video pane: fills the surface, letterboxed so any source aspect
+   ratio sits centered without distortion. */
 .video-pane {
   display: block;
   width: 100%;
-  max-height: 70vh;
-  background-color: #000;
-  border-radius: 6px;
+  height: 100%;
+  border-radius: var(--radius-card);
+  object-fit: contain;
 }
 
-/* The video's own scrub bar — click or drag to seek, A/B shown on top. A
-   plain position bar, not the Timeline's waveform+grid minimap. */
+/* The video's own scrub bar, overlaid along the bottom of .video-surface
+   (design/handoff/README.md: "Scrubber overlay along the bottom") — click or
+   drag to seek, A/B pins on top. A plain position bar, not the Timeline's
+   waveform+grid minimap. z-index (see .timeline-overview) keeps the
+   snap-mode menu nested in its handles above the HUD row below, whose
+   buttons are flex items and would otherwise win the overlap. */
 .video-scrubber {
-  position: relative;
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 2px;
+  z-index: 1;
   display: flex;
   align-items: center;
   height: 20px;
-  margin-top: 0.4rem;
   cursor: pointer;
   touch-action: none;
 }
@@ -434,7 +1062,7 @@ li {
   width: 100%;
   height: 5px;
   border-radius: 3px;
-  background-color: #ddd;
+  background-color: oklch(1 0 0 / 20%);
 }
 
 .video-scrubber-played {
@@ -442,7 +1070,7 @@ li {
   inset: 0 auto 0 0;
   height: 100%;
   border-radius: 3px;
-  background-color: #333;
+  background-color: var(--color-accent);
   pointer-events: none;
 }
 
@@ -453,73 +1081,75 @@ li {
   pointer-events: none;
 }
 
-/* Draggable A/B loop handles, styled to match TimelineOverview's own —
-   same size, same white halo, same grab cursor — so the loop reads as one
-   control that happens to be reachable from two screens. */
-.video-scrubber-handle {
-  position: absolute;
-  top: 50%;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  cursor: grab;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 9px;
-  font-weight: 700;
-  box-shadow: 0 0 0 2px white;
-  touch-action: none;
-}
-
-.video-scrubber-handle:active {
-  cursor: grabbing;
-}
-
 .video-scrubber-thumb {
   position: absolute;
   top: 50%;
-  width: 13px;
-  height: 13px;
+  width: var(--size-scrubber-playhead);
+  height: var(--size-scrubber-playhead);
   border-radius: 50%;
-  background-color: #333;
+  background-color: white;
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
-/* The no-video fallback. Dashed and labelled so it can never be mistaken for
-   a video player that happens to be black. */
+/* Fullscreen button, top-right of the scrubber overlay (design/handoff/
+   README.md: "Fullscreen button, top-right of the overlay area"). Toggles
+   fullscreen on .video-surface itself, not the bare <video> element, so the
+   scrubber and pins stay visible and usable in fullscreen instead of being
+   replaced by the browser's native video chrome. */
+.video-fullscreen-button {
+  position: absolute;
+  right: 14px;
+  bottom: 24px;
+  z-index: 1;
+  border: none;
+  background-color: oklch(1 0 0 / 15%);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* The no-video fallback, sized to fill .video-surface exactly like the real
+   <video> would. Dashed and labelled so it can never be mistaken for a video
+   player that happens to be black — the surface behind it already carries
+   the same near-black the design specifies for a real video's backdrop. */
 .video-pane-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 320px;
-  border: 2px dashed #999;
-  border-radius: 6px;
-  background-color: #f4f4f4;
-  color: #666;
-  font-size: 0.95rem;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 2px dashed oklch(0.5 0.005 90);
+  border-radius: var(--radius-card);
+  color: oklch(0.5 0.005 90);
+  font-size: 12px;
   letter-spacing: 0.02em;
 }
 
-/* The HUD is real, unlike the pane above it. */
+/* The HUD is real, unlike the pane above it. design/handoff/README.md's own
+   mock spaces the playback row 14px below the video surface. */
 .hud {
-  margin-top: 0.75rem;
+  margin-top: 14px;
 }
 
 .hud-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .readout {
   display: inline-flex;
-  align-items: baseline;
-  gap: 0.6rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
 }
 
 .readout-time {
@@ -528,5 +1158,131 @@ li {
 
 .readout-count {
   font-size: 0.85rem;
-  color: rgb(130, 95, 0);
+  /* Same dark slate as the timeline's own count digits
+     (Timeline.tsx's COUNT_LABEL_STYLE), at the user's explicit request. */
+  color: var(--color-count-label-text);
 }
+
+/* ---------------------------------------------------------------------------
+   Prompt 8 — Touch pass. Behavior only: nothing below changes any control's
+   visible size, color, or copy — every element here already carries a
+   pixel-verified look from an earlier restyle pass, and this pass is
+   explicitly scoped not to redesign any of it. Each fix is either
+   (a) an invisible ::after overlay that pads a control's CLICKABLE area out
+   to the 44x44 WCAG/Apple/Google touch-target floor without touching its
+   own box (the same technique .loop-pin-hit/.loop-pin-dot use above, just
+   without needing a second real DOM element since these controls don't
+   already carry inner content that has to stay small), or (b) a lightweight
+   :active press state where none existed — this file has never had a
+   :hover rule, so nothing here was hover-only to begin with; these controls
+   simply had no touch/press feedback at all yet.
+
+   Where two controls sit close enough together (8px row gaps are common in
+   this app) that their 44px hit-slop zones overlap, the LATER element in
+   DOM order wins the overlapping sliver (ordinary paint-order tie-break),
+   and each control's own visible glyph stays solidly inside its own zone
+   regardless. The one case worth naming: the video screen's B loop pin
+   defaults to the full track (loop.end = duration), which sits at the same
+   14px inset from the right edge as .video-fullscreen-button — their hit
+   zones now overlap in a small sliver near the top of the B pin, and the
+   fullscreen button (later in VideoScreen.tsx's DOM order) wins there. Not
+   fixed here: doing so would mean moving a button or changing the loop's
+   default bounds, both out of scope for a behavior-only pass. */
+
+html {
+  /* Kills double-tap-to-zoom app-wide while leaving single-finger panning
+     and pinch-zoom (an accessibility feature) intact — narrower than
+     disabling zoom via the viewport meta tag, which this app deliberately
+     does not do. Elements with their own drag gesture (loop pins, the
+     minimap/video-scrubber tracks, the tap pad) already set
+     touch-action:none locally; that still fully wins over this for their
+     own subtree, since an element's EFFECTIVE touch-action is the
+     intersection of its own value and its ancestors', not a simple
+     override. */
+  touch-action: manipulation;
+}
+
+html,
+body {
+  /* Stops an overscroll at the top of the page from chaining into the
+     browser's native pull-to-refresh (Chrome/Android) or an edge back/
+     forward swipe — either would otherwise reload or navigate away from a
+     live Song mid-session, tearing down its AudioContext under the user's
+     tapping/scrubbing gesture. */
+  overscroll-behavior-y: contain;
+}
+
+/* Every one of these has a visible box smaller than 44x44 in at least one
+   dimension. position:relative anchors the ::after hit-slop below.
+   .video-fullscreen-button (already position:absolute) is a valid anchor
+   as-is and is not repeated here. */
+.play-pause-button,
+.speed-dial-button,
+.song-back,
+.screen-tab,
+.song-bottom-tab,
+.import-button,
+.tap-enter,
+.tap-actions button,
+.dropdown-list-speed button,
+.loop-snap-menu button,
+.control-select-label {
+  position: relative;
+}
+
+.play-pause-button::after,
+.speed-dial-button::after,
+.video-fullscreen-button::after,
+.song-back::after,
+.screen-tab::after,
+.song-bottom-tab::after,
+.import-button::after,
+.tap-enter::after,
+.tap-actions button::after,
+.dropdown-list-speed button::after,
+.loop-snap-menu button::after,
+.control-select-label::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(44px, 100%);
+  transform: translate(-50%, -50%);
+}
+
+/* Every other selector above this hit-slop is a plain <button> with no
+   interactive descendant of its own, so an overlapping ::after never breaks
+   anything -- any click within the button's box still bubbles to its own
+   handler regardless of what it hit first. .control-select-label is
+   different: it wraps a REAL nested <select> (Onsets, Hear), and this
+   ::after was painting on top of it with no pointer-events override,
+   silently swallowing every click meant for the select and stopping its
+   native dropdown from ever opening. */
+.control-select-label::after {
+  pointer-events: none;
+}
+
+/* Press feedback where none existed. A single opacity dim rather than a
+   transform/scale, since the loop pins already carry a translate() for
+   placement that a scale() would collide with (handled separately below,
+   on the visual dot rather than the hit box, so the dim is actually
+   visible). */
+.play-pause-button:active:not(:disabled),
+.speed-dial-button:active,
+.video-fullscreen-button:active,
+.song-back:active,
+.screen-tab:active,
+.song-bottom-tab:active,
+.import-button:active:not(:disabled),
+.tap-enter:active,
+.tap-actions button:active:not(:disabled),
+.control-select:active,
+.song-row:active:not(:disabled) {
+  opacity: 0.6;
+}
+
+.loop-pin-hit:active .loop-pin-dot {
+  opacity: 0.75;
+}
+/* ------------------------------------------------------------------------ */

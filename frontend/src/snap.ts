@@ -7,6 +7,19 @@ export const SNAP_MODES: SnapMode[] = ['none', 'beat', '4-count', '8-count']
 // The mode snapping starts in until the user picks another.
 export const DEFAULT_SNAP_MODE: SnapMode = 'beat'
 
+// Modes offered from the loop's A/B handles (see LoopBoundaryHandle). 'none'
+// is a valid SnapMode elsewhere (snapTime degrades to a plain clamp) but is
+// deliberately not offered here — a loop handle with no snap at all isn't a
+// choice this menu needs to surface.
+export const BOUNDARY_SNAP_MODES: SnapMode[] = ['beat', '4-count', '8-count']
+
+export const SNAP_MODE_LABELS: Record<SnapMode, string> = {
+  none: 'No snap',
+  beat: 'Beat',
+  '4-count': '4 count',
+  '8-count': '8 count',
+}
+
 // Same-origin in dev: Vite proxies /api to the FastAPI backend, so app
 // requests never cross an origin. (The backend also sends CORS headers for
 // the Vite dev origin, so pointing this at http://127.0.0.1:8000 directly

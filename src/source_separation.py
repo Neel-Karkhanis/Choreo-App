@@ -1,11 +1,96 @@
+import contextlib
 import os
+import threading
+import demucs.apply
 import demucs.separate
+import tqdm
 from pydub import AudioSegment
 import hashlib
 from pathlib import Path
 import shutil
 
 EXPECTED_STEMS = ("drums.wav", "bass.wav", "vocals.wav", "other.wav")
+
+# Live Demucs separation progress, keyed by whatever identity the caller of
+# separate() asked to track it under (see progress_key on separate()).
+# Populated only while a separate() call is actually running Demucs — a
+# cache hit never touches this dict at all. Read by get_progress(), which the
+# API layer polls so the frontend's loading ring can track Demucs' own
+# per-chunk progress instead of faking one.
+_progress = {}
+_progress_lock = threading.Lock()
+
+
+def get_progress(key):
+    """The live Demucs separation progress for `key`, or None.
+
+    None means separation under this key either hasn't started, already
+    finished, or was skipped entirely because the stems were already cached
+    — in every one of those cases there is nothing to report. While active,
+    returns {"done": int, "total": int} counting the same per-chunk futures
+    Demucs' own tqdm bar counts (see _ProgressTrackingTqdm below), not an
+    estimate derived some other way.
+    """
+    with _progress_lock:
+        state = _progress.get(key)
+        return dict(state) if state is not None else None
+
+
+_tracking_key = threading.local()
+
+
+class _ProgressTrackingTqdm(tqdm.tqdm):
+    """tqdm.tqdm, plus publishing every update() through get_progress().
+
+    demucs.apply.apply_model() draws its own CLI progress bar by wrapping its
+    list of per-chunk futures in exactly one call: tqdm.tqdm(futures, ...)
+    (demucs/apply.py), and tqdm's own __iter__ funnels every step of that
+    through self.update(). Subclassing (rather than reimplementing) means
+    that hook is the ONLY behavior change — Demucs' console bar still draws
+    exactly as before, and any other tqdm.tqdm call demucs.separate.main()
+    happens to make on this same thread during the swap (e.g. a first-run
+    model-weights download, which isn't iterable-shaped like the chunk list
+    is) still works, since it only ever reaches update()/__init__(), both of
+    which fall through to the real implementation.
+
+    Swapped in for demucs.apply's tqdm.tqdm only for the duration of one
+    separate() call — see _tracking_demucs_progress — so /analysis/progress
+    reports the identical chunk-completion signal Demucs' own bar reads from,
+    not a separately guessed animation.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._progress_key = getattr(_tracking_key, "key", None)
+
+    def update(self, n=1):
+        result = super().update(n)
+        if self._progress_key is not None and self.total:
+            with _progress_lock:
+                _progress[self._progress_key] = {"done": self.n, "total": self.total}
+        return result
+
+
+@contextlib.contextmanager
+def _tracking_demucs_progress(key):
+    """Report `key`'s Demucs progress via get_progress() for one separate() call.
+
+    Patches the real tqdm.tqdm that demucs.apply imported (demucs.apply.main
+    hardcodes progress=True, so this constructor always gets called on a
+    separation run) and restores it afterward, whether the run succeeded or
+    raised. The entry under `key` is popped in the same finally so a finished
+    or failed run never leaves a stale percentage for a later poll to find.
+    """
+    _tracking_key.key = key
+    original_tqdm = demucs.apply.tqdm.tqdm
+    demucs.apply.tqdm.tqdm = _ProgressTrackingTqdm
+    try:
+        yield
+    finally:
+        demucs.apply.tqdm.tqdm = original_tqdm
+        _tracking_key.key = None
+        with _progress_lock:
+            _progress.pop(key, None)
 
 # Root of the per-file stem cache, relative to the process CWD (the repo root
 # in every real entry point). A single module-level binding — not an inline
@@ -54,7 +139,7 @@ def _is_cached(file_hash):
 
     return True
 
-def separate(audio_path):
+def separate(audio_path, progress_key=None):
     """Run Demucs 4-stem separation on an audio file, with caching.
 
     The audio file is hashed and stems are written to cache/stems/<hash>/.
@@ -63,6 +148,14 @@ def separate(audio_path):
 
     Args:
         audio_path: Path to the audio file.
+        progress_key: Identity to publish live progress under while Demucs
+            runs (read back via get_progress()). Defaults to audio_path's own
+            content hash, but a caller whose own identity for this track is a
+            DIFFERENT hash — e.g. the API server tracking a video track by
+            the original file's md5, when audio_path here is its extracted,
+            separately-hashed audio — should pass that identity explicitly so
+            a progress poll keyed on it actually finds this run. Ignored on a
+            cache hit: there is no Demucs run to report progress for.
 
     Returns:
         A dictionary mapping stem names ("vocals", "drums", "bass", "other")
@@ -90,14 +183,15 @@ def separate(audio_path):
             stems[stem] = str(cache_dir / f"{stem}.wav")
 
         return stems
-    
+
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    demucs.separate.main([
-        "-n", "htdemucs",
-        "-o", str(cache_dir),
-        audio_path
-    ])
+    with _tracking_demucs_progress(progress_key if progress_key is not None else file_hash):
+        demucs.separate.main([
+            "-n", "htdemucs",
+            "-o", str(cache_dir),
+            audio_path
+        ])
 
     track_name = os.path.splitext(os.path.basename(audio_path))[0]
     stem_dir = os.path.join(cache_dir, "htdemucs", track_name)
