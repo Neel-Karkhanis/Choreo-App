@@ -1,8 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import Logo from './Logo'
 import { formatTime } from './format'
+import Logo from './Logo'
 import { API_BASE } from './snap'
 import type { LibrarySong } from './types'
+
+// Settings is its own SCREEN (App.tsx's View, alongside Library/Song), not a
+// dropdown — at the user's explicit request, reversed from an earlier
+// dropdown-popover version once it grew a second option (beat snapping,
+// alongside accent color): a popover reads fine for one small control, but
+// two independent settings belong on a real screen, not stacked in a menu.
+// This button is just the trigger; SettingsScreen.tsx owns everything past
+// the click. No design mock covers a Settings control at all (the redesign
+// doesn't have one yet), so the icon is invented, same as the Timeline's own
+// canvas palette elsewhere in this app — but at the user's explicit request,
+// no longer an invented shape of its own (a hub + eight spokes, which read
+// as more of a sun/loading glyph than a gear): this is the generic settings
+// symbol every icon set converges on — an 8-tooth gear with a hole punched
+// out of the center — generated algorithmically (not hand-plotted, and not
+// recalled from any specific icon library) via a small Python script:
+// alternating outer/inner radius points around the circle for the teeth,
+// plus a same-path circle for the hole, cut out via fillRule="evenodd".
+// Filled rather than stroked (unlike SpeedControl's own icon) because a
+// gear's teeth are what read as "gear" at 15px, and a stroke outline of
+// this many vertices gets muddy that small — solid fill stays legible.
+function SettingsButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button className="speed-dial-button" onClick={onOpen} aria-label="Settings">
+      <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path
+          fillRule="evenodd"
+          d="M 20 12 L 19.85 13.56 L 22 13.99 L 20.48 17.67 L 18.65 16.44 L 17.66 17.66 L 16.44 18.65 L 17.67 20.48 L 13.99 22 L 13.56 19.85 L 12 20 L 10.44 19.85 L 10.01 22 L 6.33 20.48 L 7.56 18.65 L 6.34 17.66 L 5.35 16.44 L 3.52 17.67 L 2 13.99 L 4.15 13.56 L 4 12 L 4.15 10.44 L 2 10.01 L 3.52 6.33 L 5.35 7.56 L 6.34 6.34 L 7.56 5.35 L 6.33 3.52 L 10.01 2 L 10.44 4.15 L 12 4 L 13.56 4.15 L 13.99 2 L 17.67 3.52 L 16.44 5.35 L 17.66 6.34 L 18.65 7.56 L 20.48 6.33 L 22 10.01 L 19.85 10.44 Z
+             M 8.6 12 A 3.4 3.4 0 1 0 15.4 12 A 3.4 3.4 0 1 0 8.6 12 Z"
+        />
+      </svg>
+    </button>
+  )
+}
 
 // LEVEL 1 of the app: every song the backend has ever known, and the door into
 // each one.
@@ -61,7 +94,13 @@ function StateNote({ song }: { song: LibrarySong }) {
   return null
 }
 
-export default function Library({ onOpen }: { onOpen: (song: LibrarySong) => void }) {
+export default function Library({
+  onOpen,
+  onOpenSettings,
+}: {
+  onOpen: (song: LibrarySong) => void
+  onOpenSettings: () => void
+}) {
   const [songs, setSongs] = useState<LibrarySong[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -119,7 +158,7 @@ export default function Library({ onOpen }: { onOpen: (song: LibrarySong) => voi
           <Logo />
           <h1 className="library-wordmark">horeo</h1>
         </div>
-        <div>
+        <div className="library-head-actions">
           <input
             ref={fileRef}
             type="file"
@@ -130,6 +169,7 @@ export default function Library({ onOpen }: { onOpen: (song: LibrarySong) => voi
           <button className="import-button" onClick={() => fileRef.current?.click()} disabled={importing}>
             {importing ? 'Importing…' : 'Import song'}
           </button>
+          <SettingsButton onOpen={onOpenSettings} />
         </div>
       </header>
 

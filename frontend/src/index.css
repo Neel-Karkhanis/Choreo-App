@@ -31,22 +31,42 @@
   --color-divider: oklch(0.88 0.003 90);
 
   /* Colors -- fixed (same value in both themes) */
+  /* User-customizable via the Library's Settings panel (accentColor.ts):
+     applyStoredAccent()/useAccentColor() override this with an inline style
+     on <html>, which wins over this stylesheet value for the same property —
+     this line is only ever the DEFAULT, seen before a user has ever opened
+     Settings (or after choosing "Purple", the curated option that
+     intentionally reproduces this exact hex). Every other Timeline color
+     below that's meant to track the user's choice is deliberately written as
+     color-mix(...) against var(--color-accent) rather than its own literal
+     rgba(147, 51, 234, ...), specifically so an accent override cascades
+     into it for free with no JS beyond the one property set. */
   --color-accent: #9333ea;
   --color-status-counted: oklch(0.6 0.13 155);
   --color-status-needs-counting: oklch(0.65 0.1 80);
   --color-needs-counting-text: oklch(0.5 0.1 80);
   /* Both re-hued more than once at the user's explicit request (design
-     originally had A green/B yellow); current: A yellow, B red. Each swap
-     keeps its token's own lightness/chroma and only moves the hue, so the
-     two stay visually distinct weight-classes (A lighter/pastel at
-     0.86/0.15, B a touch darker/more saturated at 0.72/0.15) regardless of
-     which hue either carries. Everything downstream (LoopBoundaryHandle's
+     originally had A green/B yellow); currently A yellow, B light green.
+     Each swap keeps its token's own lightness/chroma and only moves the
+     hue, so the two stay visually distinct weight-classes (A lighter/
+     pastel at 0.86/0.15, B a touch darker/more saturated at 0.72/0.15)
+     regardless of which hue either carries — B's "light" in "light green"
+     is that same 0.72 weight-class read through green specifically, not a
+     lightness bump past it. Everything downstream (LoopBoundaryHandle's
      pins, playback.ts's LOOP_BAND_EDGE_A/B marker on the main timeline,
      TimelineOverview, VideoScrubber) reads these same two tokens, so a hue
      change here applies everywhere in one edit. */
   --color-loop-pin-a: oklch(0.86 0.15 95);
-  --color-loop-pin-b: oklch(0.72 0.15 25);
-  --color-onset-bass: oklch(0.5 0.18 260);
+  --color-loop-pin-b: oklch(0.72 0.15 145);
+  /* Was oklch(0.5 0.18 260) -- only ~42deg of hue from --color-accent's 302deg
+     (and nearly the same lightness, 0.5 vs 0.558), so the bass marker sank
+     into the purple active-block wash/progress fill it's drawn on top of; no
+     halo or z-index fixes that, only more hue/lightness distance does (see
+     bubbledLine's comment). Moved to a true blue at ~230deg -- ~72deg from
+     the accent and ~85deg from onset-drums's 145deg -- and nudged chroma up
+     (0.18 -> 0.2) so it doesn't read as washed-out next to the more
+     saturated accent. At the user's explicit request. */
+  --color-onset-bass: oklch(0.56 0.2 230);
   /* Design/handoff/README.md calls this red (see Timeline.tsx's onset-marker
      comment) -- re-hued more than once since, at the user's explicit
      request, a deliberate deviation from that mock; current: green. Hue
@@ -60,16 +80,115 @@
   --color-video-surface-bg: oklch(0.15 0.005 90);
   /* Translucent accent wash for the always-on loop region; a single alpha
      works in both themes since it blends with whatever page/card is under
-     it rather than needing its own light/dark pair. */
-  --color-loop-band-fill: rgba(147, 51, 234, 0.16);
+     it rather than needing its own light/dark pair. Written against
+     var(--color-accent) (was a literal rgba(147, 51, 234, 0.16)) so a
+     user-chosen accent color carries through — see --color-accent's comment. */
+  --color-loop-band-fill: color-mix(in oklab, var(--color-accent) 16%, transparent);
 
   /* Colors -- Timeline canvas/region palette (invented, light mode) */
   --color-waveform: oklch(0.62 0.005 90);
+  /* The waveform's PLAYED portion (wavesurfer's progressColor, a canvas
+     fillStyle — see Timeline.tsx's initialWaveColors/reskin effect) — at the
+     user's explicit request, dialed back from the full-strength
+     --color-accent it used to be (which read as too bold/bright) to a
+     faded purple, while staying clearly bolder than the 8-count active-block
+     wash right below it: color-mix at 55% accent is well above that wash's
+     own 10%/16% (light/dark) effective accent strength — itself lowered
+     further in a later "also fainter" pass, see --color-active-block-fill —
+     so the played waveform always reads as more prominent than the
+     highlight that's supposed to sit underneath it. Mixed toward --color-card-bg
+     rather than a hardcoded white/black, and defined ONCE (not
+     re-overridden in the dark block below) — color-mix re-resolves against
+     whichever theme's --color-card-bg is live, so this one line already
+     adapts correctly to both, the same trick --color-loop-band-fill and the
+     .tap-enter-accept hover already rely on elsewhere in this file. */
+  --color-waveform-progress: color-mix(in oklab, var(--color-accent) 55%, var(--color-card-bg));
+  /* Onset-marker-only variants of --color-onset-bass/--color-onset-drums
+     (defined up in the fixed block). Deliberately SEPARATE tokens from those
+     two, not a redefinition — the base tokens are also the drums/bass STEM
+     waveform color (STEM_WAVE_TOKEN in Timeline.tsx), which should NOT
+     follow whatever the on-waveform markers do. The Onsets dropdown's
+     option text is more mixed: Bass still reads the base token (their hues
+     never diverged), but Drums was switched to read THIS marker token
+     instead, at the user's explicit request, once the marker's own re-hue
+     to red left the base token's still-green --color-onset-drums reading
+     visibly stale there — see Timeline.tsx's onset-select comment.
+
+     First attempt here matched --color-waveform-progress's own color-mix
+     formula (55% toward --color-card-bg), reasoning the three should fade as
+     one family — that made the markers nearly invisible (measured WCAG
+     contrast against the progress fill: ~1.08, i.e. barely above "identical
+     colors"), because it faded them to almost the SAME lightness as the
+     purple they sit on top of, leaving only a weak hue difference to read
+     by. Contrast, not a shared formula, is what a marker actually needs.
+
+     Replaced with explicit values chosen by sweeping lightness/chroma at
+     each hue and picking the strongest worst-case WCAG contrast against
+     BOTH backgrounds a marker can sit on — the played (purple)
+     --color-waveform-progress and the unplayed (grey) --color-waveform —
+     confirmed against the ACTUAL rendered colors, not estimates. That
+     optimum is theme-DEPENDENT and flips direction: --color-waveform-progress
+     mixes toward --color-card-bg, so it comes out light (~L0.76) in light
+     mode but dark (~L0.42) in dark mode (mixing toward a light vs. dark
+     card) — no single marker lightness reads well against both, so unlike
+     most tokens in this file, this pair genuinely needs its own dark-mode
+     override below rather than being one same-both-themes value. Light
+     values landed dark/saturated (contrast ~3.2/3.2 worst-case, up from
+     ~1.08); the dark-mode override two blocks down is their light/saturated
+     mirror. Hue kept at the base tokens' own 230deg/145deg throughout —
+     only lightness/chroma were ever the problem.
+
+     Lightened again at the user's explicit request ("brighter shades"),
+     0.32 -> 0.4 — a deliberate step back down the same contrast-vs-
+     lightness curve above: worst-case contrast against the two backgrounds
+     drops from ~3.2 to ~2.2/2.25 (bass/drums), still comfortably clear of
+     the ~1.08 "barely visible" floor that started this whole thread, just
+     with less margin than the original max-contrast pick. Chroma nudged
+     0.14 -> 0.18 alongside it (about as far as it can go at this lightness
+     before sRGB gamut clipping, per the same sweep) so the extra lightness
+     reads as more VIVID, not just paler.
+
+     One more small step, 0.4 -> 0.42, at the user's explicit request
+     ("a little" brighter this time — deliberately smaller than the last
+     0.08 jump). Worst-case contrast eases further to ~2.04/2.07 — still a
+     healthy margin over the 1.08 floor, just less to spend before the next
+     "brighter" request would start reading as genuinely hard to see.
+
+     Drums lightened once more (0.42 -> 0.44), still green at that point —
+     bass left untouched, the first asymmetric step in this whole thread.
+
+     Then re-hued entirely, green (145deg) -> red (27deg), "on the lighter
+     side," at the user's explicit request — echoing design/handoff/
+     README.md's ORIGINAL mapping (drums -> red), which this token drifted
+     away from several re-hues ago (see the base --color-onset-drums
+     comment for that history). L/C re-swept from scratch for the new hue
+     rather than carried over, since red's own WCAG luminance behaves
+     differently from green's at the same L/C (red contributes far less to
+     perceived luminance, so it needs to sit lighter than green did to hit
+     comparable contrast) — landed on 0.44/0.2, worst-case contrast ~2.22,
+     in the same neighborhood as bass's own ~2.04. Chroma pushed to 0.2 (up
+     from 0.18): already at/near sRGB's gamut edge for red at this
+     lightness (G and B channels both hit exactly 0), about as vivid as
+     achievable. Worth flagging: red inherently sits close in hue to the
+     "Crimson" accent option (accentColor.ts, ~22deg) — unlike the blue/
+     green pair, which were deliberately chosen to clear every curated
+     accent hue by 70deg+, a properly "red" onset marker can't fully clear
+     Crimson while still reading as red; if that accent is ever picked
+     alongside this, expect them to sit close. */
+  --color-onset-bass-marker: oklch(0.42 0.18 230);
+  --color-onset-drums-marker: oklch(0.44 0.2 27);
   /* The active 8-count reads as the accent purple (same hue as
      --color-accent/--color-loop-band-fill); every other 8-count is plain
-     grey via --color-eight-count-shade below. */
-  --color-active-block-fill: rgba(147, 51, 234, 0.18);
-  --color-active-block-border: rgba(147, 51, 234, 0.65);
+     grey via --color-eight-count-shade below. Alpha lowered from 0.18 at the
+     user's explicit request — same "also fainter" pass as
+     --color-waveform-progress above — so the highlight reads as a background
+     wash rather than competing with it; the border keeps its own alpha
+     unchanged since it's the thing actually marking the block's edges, not
+     the fill. Both written against var(--color-accent) (were literal
+     rgba(147, 51, 234, ...)) so a user-chosen accent color carries through —
+     see --color-accent's own comment. */
+  --color-active-block-fill: color-mix(in oklab, var(--color-accent) 10%, transparent);
+  --color-active-block-border: color-mix(in oklab, var(--color-accent) 65%, transparent);
   --color-subdivision-tick: rgba(120, 120, 120, 0.3);
   --color-beat-tick: rgba(110, 110, 110, 0.55);
   --color-downbeat-tick: rgba(40, 40, 40, 0.85);
@@ -134,11 +253,56 @@
      translucent low-opacity washes so they don't overpower the waveform. */
   --color-waveform: oklch(0.55 0.006 90);
   /* Same accent purple as light mode's active-block fill, slightly more
-     opaque; the border brightens toward the accent's lighter end so it
-     doesn't get lost against a dark card, same reasoning as the tick colors
-     above. */
-  --color-active-block-fill: rgba(147, 51, 234, 0.28);
-  --color-active-block-border: rgba(191, 132, 246, 0.85);
+     opaque (same ratio preserved after the fainter pass above — was
+     0.28/0.18 ≈ 1.6x light, still ≈1.6x at 0.16/0.1); the border brightens
+     toward the accent's lighter end so it doesn't get lost against a dark
+     card, same reasoning as the tick colors above. Both written against
+     var(--color-accent) (were rgba(147, 51, 234, 0.16) and a literal
+     pre-lightened rgba(191, 132, 246, 0.85)) so a user-chosen accent color
+     carries through here too — the border's lightening is now a nested
+     color-mix (accent toward white, 65% accent best-fits the old literal's
+     lightened hue) wrapped in the outer alpha mix, rather than a value that
+     could only ever be right for the one purple it was measured from. */
+  --color-active-block-fill: color-mix(in oklab, var(--color-accent) 16%, transparent);
+  --color-active-block-border: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--color-accent) 65%, white) 85%,
+    transparent
+  );
+  /* Light/saturated mirror of the light-mode markers above — see
+     --color-onset-bass-marker's comment for why this pair needs its own
+     dark-mode override rather than sharing one value like the rest of this
+     file: --color-waveform-progress comes out DARK here (mixed toward the
+     dark card), so the marker needs to go light instead of dark to keep the
+     same worst-case contrast (swept the same way as the light values).
+     Same 230deg/145deg hues.
+
+     Brightened further at the user's explicit request, 0.8 -> 0.88 — unlike
+     the light-mode pair, this is a pure win rather than a tradeoff: going
+     LIGHTER here means going further from the (dark, ~L0.42) progress fill
+     and the mid-grey waveform, so contrast actually IMPROVES alongside the
+     brightening (worst-case ~2.6/2.8 -> ~3.3/3.6). Chroma bumped to 0.18 on
+     bass too (drums was already there) for the same "more vivid, not just
+     paler" reasoning as the light-mode pair.
+
+     One more small step, 0.88 -> 0.9, at the user's explicit request
+     ("a little" brighter, same pass as the light-mode pair above) — still a
+     pure win here, contrast keeps climbing (~3.5/3.8).
+
+     Drums lightened once more (0.9 -> 0.92), still green at that point.
+
+     Then re-hued to red (27deg) alongside its light-mode counterpart — see
+     that token's comment for the full reasoning (echoing the original
+     design mapping, the Crimson-accent proximity caveat). Unlike blue/
+     green, where dark-mode brightening was a pure win, red's WCAG luminance
+     climbs much more slowly with L (same reason the light-mode pick needed
+     more chroma/lightness for equivalent contrast) — landed on 0.8/0.2
+     rather than mirroring bass's 0.9, since pushing red past ~0.8 here
+     starts reading as pink rather than red without meaningfully helping
+     contrast (worst-case ~2.0, well below bass's ~3.5 at 0.9, but this is
+     red's own ceiling for still looking like red, not an oversight). */
+  --color-onset-bass-marker: oklch(0.9 0.18 230);
+  --color-onset-drums-marker: oklch(0.8 0.2 27);
   --color-subdivision-tick: rgba(190, 190, 190, 0.35);
   --color-beat-tick: rgba(180, 180, 180, 0.6);
   --color-downbeat-tick: rgba(235, 235, 235, 0.9);
@@ -293,6 +457,24 @@ li {
   box-sizing: border-box;
 }
 
+/* Wavesurfer's own playhead cursor (a shadow-DOM element, part="cursor")
+   defaults to spanning its host's FULL height — the whole
+   TIMELINE_TRACK_HEIGHT box, count-label band included — which at the
+   user's explicit request reads as the playhead "shooting through and
+   above the actual timeline box" (visually running through the count
+   numbers, not just the waveform grid below them). ::part() is the one
+   thing that CAN reach into that shadow root from plain CSS; top/height
+   read the two custom properties Timeline.tsx sets on .timeline-waveform
+   (waveformTopPct(0)/waveformPct(100) — same anchor every tick and onset
+   marker already uses), so the cursor now stops exactly at the waveform's
+   own zone instead of the label band above it. Custom properties (unlike
+   selectors) inherit across a shadow boundary, which is what makes this
+   possible at all. */
+.timeline-waveform > div::part(cursor) {
+  top: var(--cursor-top);
+  height: var(--cursor-height);
+}
+
 /* Full-bleed divider between the waveform and the minimap/controls beneath
    it — negative horizontal margin cancels the card's own padding so it runs
    edge-to-edge within the card. */
@@ -432,6 +614,87 @@ li {
   font-size: 10px;
   color: var(--color-muted-text);
   padding: 0 2px;
+}
+
+/* Settings screen (SettingsScreen.tsx) — its own LEVEL 1 screen, not a
+   dropdown (see that file's own comment for why); same centered-column
+   geometry as .library so the two top-level screens read as siblings, not
+   as a "main app" and a bolted-on afterthought. */
+.settings {
+  width: 85%;
+  margin: 25px auto 0;
+}
+
+.settings-section {
+  margin-top: 28px;
+}
+
+.settings-section-title {
+  margin: 0 0 4px;
+  font-size: var(--font-row-title-size);
+  font-weight: var(--font-row-title-weight);
+}
+
+.settings-section-note {
+  margin: 0 0 12px;
+  font-size: var(--font-row-note-size);
+  color: var(--color-muted-text);
+  max-width: 46em;
+}
+
+.settings-section-label {
+  font-size: var(--font-tab-size);
+  font-weight: var(--font-tab-weight);
+  color: var(--color-muted-text);
+}
+
+.settings-snap-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Same radio-buttons-as-toggle-buttons shape as the loop handles' own snap
+   menu (LoopBoundaryHandle's .loop-snap-menu button) — deliberately reused
+   rather than a native <select>, since "which of 4 is active" reads better
+   as a row of buttons than a closed dropdown when there's a whole screen's
+   width to spend on it. toggleStyle (styles.ts) supplies the active/
+   inactive fill inline; this is just the shared inactive-state chrome. */
+.settings-snap-row button {
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-muted-text);
+  padding: 6px 14px;
+  border-radius: var(--radius-input);
+  font-size: var(--font-button-size);
+  font-weight: var(--font-button-weight);
+  cursor: pointer;
+}
+
+.accent-swatch-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Each swatch shows its own color as a solid fill — no text, no icon — the
+   color IS the label. The selected one gets a ring in the page's own text
+   color (not the swatch's own hue, which would vanish on the purple/rose
+   swatches specifically) offset by a gap so it reads as "selected" rather
+   than merging into the fill. */
+.accent-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--color-card-border);
+}
+
+.accent-swatch[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--color-card-bg),
+    0 0 0 4px var(--color-text);
 }
 
 /* Re-tap's own hue: the app's accent purple (--color-accent), same one
@@ -838,6 +1101,15 @@ li {
   display: flex;
   align-items: center;
   gap: 1px;
+}
+
+/* Import + Settings, side by side on the header's right edge (library-head's
+   own space-between put this whole div there already; this just keeps its
+   two children from stacking). */
+.library-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .library-wordmark {

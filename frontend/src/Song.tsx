@@ -5,7 +5,7 @@ import VideoScreen from './VideoScreen'
 import { buildEightCountWindows } from './eightCount'
 import { useManualGrid, type ManualGridStore } from './manualGrid'
 import { useEngineTransport, useLoop, useSpeed } from './playback'
-import { API_BASE, DEFAULT_SNAP_MODE, snapTime, type SnapDirection, type SnapMode } from './snap'
+import { API_BASE, readDefaultSnapMode, snapTime, type SnapDirection, type SnapMode } from './snap'
 import { DEFAULT_STEM_MODE, StemEngine, loadStems, type StemMode } from './stemEngine'
 import { useTapSession } from './tapSession'
 import type { GridData, LibrarySong, OnsetData } from './types'
@@ -410,7 +410,12 @@ function SongShell({
   // units, and snapTime still degrades to a plain clamp when there is no
   // grid yet, which is what lets A/B default to the track's true start/end
   // before a song has ever been tapped.
-  const [snapMode, setSnapMode] = useState<SnapMode>(DEFAULT_SNAP_MODE)
+  // Initial value only — reads the user's Settings-screen preference (or the
+  // factory default if they've never set one) once, at mount. A song already
+  // open does NOT react to a later Settings change; it takes effect the next
+  // time a song is opened, same as accent/dark-mode's own "applies from here
+  // forward" behavior.
+  const [snapMode, setSnapMode] = useState<SnapMode>(readDefaultSnapMode)
   const snapToMode = useCallback(
     (time: number, direction: SnapDirection) => snapTime(time, snapMode, effectiveGrid, duration, direction),
     [snapMode, effectiveGrid, duration],

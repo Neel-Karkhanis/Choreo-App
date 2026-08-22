@@ -41,6 +41,7 @@ export type ColorToken =
   | 'onsetDrums'
   | 'importButtonBg'
   | 'waveform'
+  | 'waveformProgress'
   | 'stemVocals'
   | 'stemInstrumental'
 
@@ -64,6 +65,7 @@ const CSS_VAR: Record<ColorToken, string> = {
   onsetDrums: '--color-onset-drums',
   importButtonBg: '--color-import-button-bg',
   waveform: '--color-waveform',
+  waveformProgress: '--color-waveform-progress',
   stemVocals: '--color-stem-vocals',
   stemInstrumental: '--color-stem-instrumental',
 }

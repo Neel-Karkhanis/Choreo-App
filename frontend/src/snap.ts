@@ -1,11 +1,65 @@
+import { useEffect, useState } from 'react'
 import type { GridData } from './types'
 
 export type SnapMode = 'none' | 'beat' | '4-count' | '8-count'
 
 export const SNAP_MODES: SnapMode[] = ['none', 'beat', '4-count', '8-count']
 
-// The mode snapping starts in until the user picks another.
+// The FACTORY default: what a song opens with if the user has never visited
+// Settings (or storage is unavailable) — see readDefaultSnapMode/
+// useDefaultSnapMode below for the user-customizable version of this.
 export const DEFAULT_SNAP_MODE: SnapMode = 'beat'
+
+// User-customizable default snap mode (Settings screen), at the user's
+// explicit request — a device preference, not song data, so a plain
+// localStorage string is the whole persistence story, same reasoning as
+// theme.ts's dark-mode flag and accentColor.ts's accent choice. Unlike
+// those two, nothing here needs a pre-mount "apply to the DOM" step: this
+// only ever feeds a useState INITIALIZER (Song.tsx reads it once, the
+// moment a song's own snapMode state is created), not a live style, so
+// there's no flash to prevent — the value simply needs to be correct by the
+// time that useState call runs, which reading synchronously already gives.
+const STORAGE_KEY = 'choreo-default-snap-mode'
+
+function isSnapMode(value: string): value is SnapMode {
+  return (SNAP_MODES as string[]).includes(value)
+}
+
+export function readDefaultSnapMode(): SnapMode {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    return stored && isSnapMode(stored) ? stored : DEFAULT_SNAP_MODE
+  } catch {
+    return DEFAULT_SNAP_MODE
+  }
+}
+
+export interface DefaultSnapModeController {
+  defaultSnapMode: SnapMode
+  setDefaultSnapMode: (mode: SnapMode) => void
+}
+
+/**
+ * Owns the live default-snap-mode preference and keeps localStorage in sync
+ * with it. Mirrors theme.ts's useDarkMode / accentColor.ts's useAccentColor
+ * shape (one hook, one small object of state plus the action that changes
+ * it) — Settings-screen-only; nothing about an open Song reads this hook
+ * directly, only readDefaultSnapMode's plain read at mount.
+ */
+export function useDefaultSnapMode(): DefaultSnapModeController {
+  const [defaultSnapMode, setDefaultSnapMode] = useState<SnapMode>(readDefaultSnapMode)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, defaultSnapMode)
+    } catch {
+      // Storage unavailable — the choice still applies for this session, it
+      // just won't persist across reloads.
+    }
+  }, [defaultSnapMode])
+
+  return { defaultSnapMode, setDefaultSnapMode }
+}
 
 // Modes offered from the loop's A/B handles (see LoopBoundaryHandle). 'none'
 // is a valid SnapMode elsewhere (snapTime degrades to a plain clamp) but is
