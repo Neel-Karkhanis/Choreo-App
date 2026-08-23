@@ -111,33 +111,41 @@ export function SpeedControl({ speed }: { speed: SpeedController }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useCloseOnOutsideClick(open, setOpen, ref)
+  const isDefault = speed.speed === SPEED_DEFAULT
 
   return (
-    <div className="dropdown" ref={ref}>
+    <div className="dropdown speed-dial-dropdown" ref={ref}>
       <button
         className="speed-dial-button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="true"
         aria-expanded={open}
         aria-label={`Playback speed: ${speed.speed.toFixed(2)}×`}
-        style={toggleStyle(speed.speed !== SPEED_DEFAULT, SPEED_ACTIVE_COLOR)}
+        style={toggleStyle(!isDefault, SPEED_ACTIVE_COLOR)}
       >
-        {/* design/handoff/Choreo Redesign.dc.html's speed-dial icon, ported
-            verbatim (arc + hand + hub); stroke/fill use currentColor so
-            toggleStyle's active-state color above drives the icon too. */}
-        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 18a8 8 0 1 1 16 0" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
-          <line x1={12} y1={18} x2={16} y2={12} stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
-          <circle cx={12} cy={18} r={1.3} fill="currentColor" />
-        </svg>
+        {isDefault ? (
+          // design/handoff/Choreo Redesign.dc.html's speed-dial icon, ported
+          // verbatim (arc + hand + hub); stroke/fill use currentColor so
+          // toggleStyle's active-state color above drives the icon too.
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 18a8 8 0 1 1 16 0" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+            <line x1={12} y1={18} x2={16} y2={12} stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+            <circle cx={12} cy={18} r={1.3} fill="currentColor" />
+          </svg>
+        ) : (
+          // Off the default rate, the icon gives way to the rate itself so
+          // the button doubles as a readout, not just a toggle.
+          <span className="speed-dial-value">{formatSpeed(speed.speed)}×</span>
+        )}
       </button>
       {open && (
         <div className="dropdown-list dropdown-list-speed" role="menu">
           <input
             type="range"
+            className="speed-dial-slider"
             min={SPEED_MIN}
             max={SPEED_MAX}
-            step={SPEED_STEP}
+            step="any"
             list="speed-dials"
             value={speed.speed}
             aria-label="Playback speed"
@@ -153,13 +161,19 @@ export function SpeedControl({ speed }: { speed: SpeedController }) {
               <span key={v}>{v}×</span>
             ))}
           </div>
-          <button onClick={speed.resetSpeed} disabled={speed.speed === SPEED_DEFAULT}>
+          <button className="speed-dial-reset" onClick={speed.resetSpeed} disabled={isDefault}>
             Reset to 1×
           </button>
         </div>
       )}
     </div>
   )
+}
+
+// Rounds a free-dragged rate to a readable 2dp and drops trailing zeros
+// (1.5 not 1.50, 1 not 1.00) so the button's readout stays compact.
+function formatSpeed(v: number): string {
+  return (Math.round(v * 100) / 100).toString()
 }
 
 /**

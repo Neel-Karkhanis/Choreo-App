@@ -443,5 +443,139 @@ class TestImport(LibraryTestCase):
         self.assertEqual(ctx.exception.status_code, 400)
 
 
+class TestRename(LibraryTestCase):
+    def test_renames_the_file_and_keeps_the_extension(self):
+        audio = self.add_track("before.mp3")
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+
+        result = server.rename_track(md5, server.RenameTrack(name="after"))
+
+        self.assertEqual(result["filename"], "after.mp3")
+        self.assertTrue((self.tracks_dir / "after.mp3").exists())
+        self.assertFalse((self.tracks_dir / "before.mp3").exists())
+
+    def test_keeps_the_same_md5_and_grid(self):
+        """A rename must not fork the song into a second library entry."""
+        audio = self.add_track("before.mp3")
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+        self.seed_grid(md5)
+
+        server.rename_track(md5, server.RenameTrack(name="after"))
+
+        songs = server.list_library()["songs"]
+        self.assertEqual(len(songs), 1, "a rename split one song into two entries")
+        self.assertEqual(songs[0]["md5"], md5)
+        self.assertEqual(songs[0]["filename"], "after.mp3")
+        self.assertTrue(songs[0]["grid_present"])
+
+    def test_a_no_op_rename_to_its_own_name_succeeds(self):
+        audio = self.add_track("song.mp3")
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+
+        result = server.rename_track(md5, server.RenameTrack(name="song"))
+        self.assertEqual(result["filename"], "song.mp3")
+
+    def test_rejects_an_empty_name(self):
+        audio = self.add_track()
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+
+        with self.assertRaises(server.HTTPException) as ctx:
+            server.rename_track(md5, server.RenameTrack(name="   "))
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_rejects_a_path_traversal_name(self):
+        audio = self.add_track()
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+
+        with self.assertRaises(server.HTTPException) as ctx:
+            server.rename_track(md5, server.RenameTrack(name="../evil"))
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertTrue(audio.exists(), "the original file must be left alone on a rejected rename")
+
+    def test_conflicts_with_an_existing_file(self):
+        self.add_track("taken.mp3")
+        audio = self.add_track("mine.mp3")
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+
+        with self.assertRaises(server.HTTPException) as ctx:
+            server.rename_track(md5, server.RenameTrack(name="taken"))
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertTrue(audio.exists(), "a rejected rename must not touch the source file")
+
+    def test_404s_when_the_source_file_is_evicted(self):
+        audio = self.add_track()
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+        audio.unlink()
+
+        with self.assertRaises(server.HTTPException) as ctx:
+            server.rename_track(md5, server.RenameTrack(name="whatever"))
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
+class TestDelete(LibraryTestCase):
+    def test_removes_the_file_stems_grid_and_manifest(self):
+        audio = self.add_track()
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+        self.seed_stems(md5)
+        self.seed_grid(md5)
+
+        result = server.delete_track(md5)
+
+        self.assertEqual(result["deleted"], md5)
+        self.assertFalse(audio.exists())
+        self.assertFalse((self.cache_dir / md5).exists())
+        self.assertFalse((self.grids_dir / f"{md5}.json").exists())
+        self.assertFalse(server._manifest_path(md5).exists())
+        self.assertIsNone(self.entry(md5), "a deleted song must not still be listed")
+
+    def test_is_unrecoverable_by_re_import(self):
+        """Unlike an eviction, a delete also drops the manifest that would
+        have reconnected a re-import to the old grid."""
+        data = b"the one song that matters"
+        first = _import("song.mp3", data)
+        md5 = first["md5"]
+        self.seed_grid(md5)
+
+        server.delete_track(md5)
+        again = _import("song.mp3", data)
+
+        self.assertEqual(again["md5"], md5, "re-import of identical bytes always hashes the same")
+        entry = self.entry(md5)
+        self.assertEqual(entry["state"], "needs_tap", "the old grid must not come back after a delete")
+        self.assertFalse(entry["grid_present"])
+
+    def test_is_idempotent(self):
+        audio = self.add_track()
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+        self.seed_stems(md5)
+        self.seed_grid(md5)
+
+        server.delete_track(md5)
+        server.delete_track(md5)  # must not raise
+
+        self.assertIsNone(self.entry(md5))
+
+    def test_works_on_an_evicted_entry_with_no_source_file(self):
+        """The row's whole point at that state is to still be deletable."""
+        audio = self.add_track()
+        md5 = server._file_hash(audio)
+        server._write_manifest(audio, md5, 180.5)
+        self.seed_grid(md5)
+        audio.unlink()
+
+        server.delete_track(md5)
+        self.assertIsNone(self.entry(md5))
+        self.assertFalse((self.grids_dir / f"{md5}.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

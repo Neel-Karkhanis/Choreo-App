@@ -40,8 +40,16 @@
      below that's meant to track the user's choice is deliberately written as
      color-mix(...) against var(--color-accent) rather than its own literal
      rgba(147, 51, 234, ...), specifically so an accent override cascades
-     into it for free with no JS beyond the one property set. */
-  --color-accent: #9333ea;
+     into it for free with no JS beyond the one property set.
+     Re-hued from the original vivid #9333ea to #8d41bc — same ~310° hue as
+     the user-supplied #b57edc, darkened/deepened from it, then nudged
+     slightly back up in lightness from the #7e30ab that landed on — at
+     their explicit request (speed dial's active state/slider, "Re-tap the
+     counts", the Logo, and every color-mix(...) above that tracks accent
+     all read this same token, so the one edit here carries to all of them —
+     see accentColor.ts's matching 'purple' option, which this value must
+     keep mirroring exactly). */
+  --color-accent: #8d41bc;
   --color-status-counted: oklch(0.6 0.13 155);
   --color-status-needs-counting: oklch(0.65 0.1 80);
   --color-needs-counting-text: oklch(0.5 0.1 80);
@@ -484,24 +492,88 @@ li {
   margin: var(--space-card-divider-margin);
 }
 
+/* Two explicit rows now, at the user's explicit request, rather than one
+   flex-wrap row left to fall onto a second line on its own: top row is
+   Play/TimeReadout/SpeedControl (left) + Onsets (right, pushed there by its
+   own marginLeft:auto); bottom row is Redo counts (left, under Play/
+   TimeReadout) + Hear (right, under Onsets, via HearControl's alignEnd). */
 .timeline-controls {
+  display: flex;
+  flex-direction: column;
+  /* The vertical whitespace between the two rows — i.e. between Redo counts
+     (bottom row) and Play (top row): original 8px, bumped 30% to 10.4px,
+     then a further 50% from THAT (10.4 * 1.5 = 15.6) — both at the user's
+     explicit request. Row-internal spacing (.timeline-controls-row's own
+     gap, between e.g. Play and TimeReadout) is untouched. */
+  gap: 15.6px;
+  margin-top: 9px;
+}
+
+.timeline-controls-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 9px;
   flex-wrap: wrap;
+}
+
+/* The zoomed waveform's own always-visible viewport indicator (Timeline.tsx
+   has the full "why" — wavesurfer's native scrollbar for that pane is
+   shadow-DOM-confined and only flashes in with the OS's overlay-scrollbar
+   behavior, i.e. effectively "only while playing"). A sibling BELOW the
+   whole .timeline card, not nested inside it, per the same explicit request
+   that moved it out. Track/thumb geometry echoes .timeline-overview-track
+   above (same 4px bar, same rounding) so the two read as a matched pair,
+   not two different slider designs. */
+.timeline-viewport {
+  position: relative;
+  margin-top: 6px;
+  padding: 0 9px;
+}
+
+.timeline-viewport-track {
+  position: relative;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.timeline-viewport-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background-color: var(--color-card-border);
+  pointer-events: none;
+}
+
+.timeline-viewport-thumb {
+  position: absolute;
+  height: 4px;
+  min-width: 4px;
+  border-radius: 2px;
+  background-color: var(--color-accent);
+  pointer-events: none;
 }
 
 /* Shared "Onsets"/"Hear" control: a label wrapping a native <select>, styled
    to the design's input chrome. A native select is what lets the Onsets
-   options carry per-option color (see Timeline.tsx) with no extra markup. */
+   options carry per-option color (see Timeline.tsx) with no extra markup.
+   Text color is the app's existing dark-slate token (--color-count-label-
+   text — same one the timeline's own count digits/readout use, and now
+   .redo-counts-button too), not --color-muted-text, at the user's explicit
+   request; .control-select below reads color:inherit, so the <select>
+   itself follows without its own override. */
 .control-select-label {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--color-muted-text);
+  color: var(--color-count-label-text);
 }
 
 .control-select {
@@ -567,6 +639,18 @@ li {
   position: relative;
 }
 
+/* The speed dial's own wrapper (SpeedControl, only ever rendered in
+   Timeline.tsx's top controls row) — shifted right 20px from its normal
+   flex position, at the user's explicit request. Margin lands on THIS
+   wrapper rather than .speed-dial-button itself so .dropdown-list-speed's
+   own `left:0` (relative to this same wrapper) still opens directly under
+   the button instead of drifting out from under it. A modifier class of
+   its own, not a change to bare .dropdown, since that class is shared with
+   unrelated dropdowns elsewhere (e.g. Library's row menu). */
+.speed-dial-dropdown {
+  margin-left: 7px;
+}
+
 .dropdown-list {
   position: absolute;
   top: 100%;
@@ -604,8 +688,60 @@ li {
   white-space: nowrap;
 }
 
+/* The snap-mode options themselves (beat/4-count/8-count) had no chrome of
+   their own until now — bare <button>s, browser-default rectangles, with
+   only the SELECTED one getting a fill via toggleStyle inline. Bubbled
+   (--radius-pill) at the user's explicit request, matching the app's other
+   pill buttons (.speed-dial-reset, .import-button) rather than the square
+   --radius-input .settings-snap-row button uses for the same kind of
+   control elsewhere — the two no longer share a radius, only the shape
+   of the interaction (a row of toggle buttons standing in for a select). */
+.loop-snap-menu button {
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  /* Dark slate, not --color-muted-text, at the user's explicit request —
+     only the INACTIVE label reads this; toggleStyle's inline color: white
+     on the selected option still wins over it, unaffected. */
+  color: #2f4f4f;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-button-size);
+  font-weight: var(--font-button-weight);
+  cursor: pointer;
+}
+
 .dropdown-list-speed input[type='range'] {
   width: 100%;
+}
+
+/* Numeric readout swapped in for the dial icon (speed-dial-button) once the
+   rate is off 1x -- sized/weighted to sit in the same glyph box as the SVG
+   it replaces rather than stretching the button. */
+.speed-dial-value {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Free-dragging rate slider: purple track/thumb (var(--color-accent), same
+   token the dial button's active state uses) instead of the browser
+   default, cross-browser via the -webkit/-moz pseudo-elements. */
+.speed-dial-slider {
+  accent-color: var(--color-accent);
+}
+
+.speed-dial-slider::-webkit-slider-thumb {
+  background: var(--color-accent);
+}
+
+.speed-dial-slider::-moz-range-thumb {
+  background: var(--color-accent);
+  border: none;
+}
+
+.speed-dial-slider::-moz-range-progress {
+  background: var(--color-accent);
 }
 
 .speed-dial-labels {
@@ -614,6 +750,25 @@ li {
   font-size: 10px;
   color: var(--color-muted-text);
   padding: 0 2px;
+}
+
+/* "Reset to 1x": a rectangular bubble (pill), matching the app's other pill
+   buttons (--radius-pill, e.g. .import-button) instead of a plain
+   right-angled rectangle. */
+.speed-dial-reset {
+  border: 1px solid var(--color-input-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-text);
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-button-size);
+  cursor: pointer;
+  align-self: center;
+}
+
+.speed-dial-reset:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Settings screen (SettingsScreen.tsx) — its own LEVEL 1 screen, not a
@@ -697,20 +852,58 @@ li {
     0 0 0 4px var(--color-text);
 }
 
-/* Re-tap's own hue: the app's accent purple (--color-accent), same one
-   used for the active 8-count block and loop band elsewhere. Pill/"bubble"
-   shaped like .import-button (--radius-pill), at the user's explicit
-   request, rather than the plain rectangular default button chrome it had
-   before -- border dropped since a filled pill needs no outline of its own. */
-.tap-enter {
-  background-color: var(--color-accent);
-  border: none;
+/* "Redo counts" / "Exit tap mode" (Timeline.tsx: the bottom .timeline-
+   controls-row, left-aligned under Play/TimeReadout, mirroring Hear's spot
+   under Onsets on the right) — was an accent-filled pill; ghost/outline now
+   instead: a hairline border, no purple fill, since this
+   is a maintenance action, not the primary/affirmative one (that treatment
+   stays on the tap panel's own Accept button). Still pill-shaped like the
+   rest of the app's buttons, just unfilled. The confirmation this now
+   requires (ConfirmDialog, rendered alongside TapOverlay in Timeline.tsx)
+   gates only "Redo counts" — while already tapping, the button exits tap
+   mode directly instead, nothing to confirm there since exiting discards no
+   saved grid. Text is the app's existing dark-slate token (same one the
+   Onsets/Hear controls now use — .control-select-label — and the same one
+   the timeline's own count digits/readout use), not --color-muted-text, at
+   the user's explicit request; the icon reads currentColor so it follows
+   along automatically. Border stays on --color-muted-text — only the FONT
+   was asked to change. */
+.redo-counts-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  background: transparent;
+  border: 0.5px solid var(--color-muted-text);
   border-radius: var(--radius-pill);
-  color: white;
-  padding: 6px 14px;
+  color: var(--color-count-label-text);
+  padding: 4px 12px;
   font-size: var(--font-button-size);
   font-weight: var(--font-button-weight);
   cursor: pointer;
+}
+
+.redo-counts-button svg {
+  flex: none;
+}
+
+.redo-counts-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Icon-only past this width — the label is what gives first under pressure,
+   not the icon (aria-label on the button itself keeps the accessible name
+   regardless of which one is visually shown). A deliberate one-off exception
+   to the rest of the app's fixed single-width layout (see this file's "Still
+   no responsive layout work" note above). */
+@media (max-width: 480px) {
+  .redo-counts-label {
+    display: none;
+  }
+  .redo-counts-button {
+    padding: 4px;
+  }
 }
 
 /* Tap-counting panel (design/handoff/README.md "Tap-counting panel"): a
@@ -732,9 +925,10 @@ li {
    is touched. The accent-filled treatment lands on "Accept" (the real
    primary/affirmative action) driven by its own real enabled/disabled state;
    that is the closest actual state this panel has to the mock's idle/active
-   toggle, not a recreation of it. Entering tap mode ("Re-tap the count") is
-   a different control living outside this panel, in Timeline.tsx's controls
-   row (.tap-enter, above) — out of scope for "the tap-counting panel". */
+   toggle, not a recreation of it. Entering tap mode ("Redo counts") is a
+   different control living outside this panel, in the controls row below
+   the waveform (.redo-counts-button) — out of scope for "the tap-counting
+   panel". */
 .tap-panel {
   box-sizing: border-box;
   margin-top: 14px;
@@ -930,6 +1124,10 @@ li {
 .song-scroll {
   width: 100%;
   margin-top: 25px;
+  /* Breathing room below the Library/[song name] pill, now the last thing in
+     this container's normal flow (it used to be fixed to the viewport, so
+     nothing here needed to reserve space for it). */
+  padding-bottom: 24px;
   box-sizing: border-box;
 }
 
@@ -1043,22 +1241,23 @@ li {
   white-space: nowrap;
 }
 
-/* Bottom-fixed floating pill nav (design/handoff/README.md: "position:
-   absolute; bottom:24px" relative to the device frame). The real app has no
-   device frame, so this is the fixed-to-viewport equivalent — same always-
-   visible result, without the frame's fixed-height/overflow:auto scaffolding. */
+/* The Library/[song name] bubbled pill switch (design/handoff/README.md:
+   "position: absolute; bottom:24px" relative to the device frame) — no
+   longer fixed to the viewport at the user's explicit request. It's a
+   normal in-flow element now, rendered directly below the Timeline card in
+   Song.tsx's JSX, so it scrolls away with the rest of the page instead of
+   hovering over it. width:fit-content + auto side margins is what centers a
+   plain block-level element this way (the fixed version centered itself via
+   left:50%/transform instead, which only works for a positioned element). */
 .song-bottom-tabs {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
   display: flex;
+  width: fit-content;
+  margin: 20px auto 0;
   gap: 4px;
   background-color: var(--color-chip-bg);
   padding: 3px;
   border-radius: var(--radius-card);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  z-index: 50;
 }
 
 .song-bottom-tab {
@@ -1080,6 +1279,79 @@ li {
   background-color: var(--color-card-bg);
   color: inherit;
   cursor: default;
+}
+
+/* ConfirmDialog (ConfirmDialog.tsx): a generic destructive-action gate,
+   currently only "Redo counts". Fixed/centered over the whole viewport, with
+   its own dim scrim rather than sharing .song-loading's pointer-events:none
+   treatment — this one MUST block interaction with everything beneath it. */
+.confirm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+.confirm-dialog {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 320px;
+  padding: 20px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-card-bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+}
+
+.confirm-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.confirm-dialog p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-muted-text);
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-dialog-actions button {
+  border-radius: var(--radius-pill);
+  padding: 8px 16px;
+  font-size: var(--font-button-size);
+  font-weight: var(--font-button-weight);
+  cursor: pointer;
+}
+
+/* The default/secondary action — plain outline, no fill, same ghost
+   treatment as .redo-counts-button — since this dialog exists specifically
+   to make Cancel the easy, unremarkable choice. */
+.confirm-dialog-cancel {
+  border: 0.5px solid var(--color-card-border);
+  background: transparent;
+  color: var(--color-text);
+}
+
+/* The destructive action — the one button in the app that isn't the accent
+   purple, since accent means "primary/affirmative" everywhere else (Accept,
+   in the tap panel) and this is neither: it destroys the current count grid.
+   crimson matches .error's existing (also unthemed) literal, so the app's
+   one danger color reads consistently wherever it shows up. */
+.confirm-dialog-confirm {
+  border: none;
+  background-color: crimson;
+  color: white;
 }
 
 /* Library (design/handoff/README.md "1. Library"): 85%-wide centered column,
@@ -1145,22 +1417,38 @@ li {
   margin: 0;
 }
 
-/* Whole row is a <button> (not a div with onClick) so it's keyboard-reachable
-   and gets Enter/Space activation for free. Visual padding stays exactly
-   9px/6px per the design; min-height extends the hit area to the 44px
-   touch-target floor without changing that visual padding — rows whose
-   content is shorter than 44px just center within the extra room. */
+/* The row itself, on the <li> now rather than a single <button> — it holds
+   the "open song" control and the "⋮" menu as two independent siblings (see
+   .song-row-open below for why they can't be nested). Visual padding stays
+   exactly 9px/6px per the design; min-height extends the hit area to the
+   44px touch-target floor without changing that visual padding — rows
+   whose content is shorter than 44px just center within the extra room. */
 .song-row {
   width: 100%;
   min-height: 44px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: var(--space-row-padding);
-  border: none;
   border-bottom: var(--border-width-row-divider) solid
     color-mix(in oklab, var(--color-accent) 45%, var(--color-card-border));
+}
+
+/* The actual "open song" click target: a <button> normally, swapped for a
+   plain <div> while renaming (Library.tsx's SongRow) since an <input> is
+   interactive content and HTML doesn't allow it inside a <button> at all.
+   flex:1 fills the row minus the menu button's own width; min-width:0 is
+   what lets the title still ellipsis now that it shares the row with a
+   second flex item instead of being the row's only content. */
+.song-row-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: none;
   background: none;
   color: inherit;
   font: inherit;
@@ -1168,11 +1456,11 @@ li {
   cursor: pointer;
 }
 
-.song-row:disabled {
+button.song-row-open:disabled {
   cursor: not-allowed;
 }
 
-.song-row:disabled .song-title {
+button.song-row-open:disabled .song-title {
   color: var(--color-muted-text);
 }
 
@@ -1250,6 +1538,87 @@ li {
   font-size: 12px;
   color: var(--color-muted-text);
   font-variant-numeric: tabular-nums;
+}
+
+/* Dark slate — the app's existing --color-count-label-text token, same one
+   the timeline's own count digits/readout and Onsets/Hear now use — for a
+   song whose audio file is actually still present (data-present, from
+   song.original_present). An evicted row (the file is gone; see the
+   library's THE THREE STATES comment) keeps the plain muted-text color
+   above instead, since dressing up a duration for audio that can't be
+   played would overstate what that row can actually do. */
+.song-duration[data-present='true'] {
+  color: var(--color-count-label-text);
+}
+
+/* The row's "⋮" trigger (Library.tsx's SongRowMenu) — reuses .dropdown for
+   its own position:relative anchor, same as SpeedControl's dropdown. flex:
+   none so it never gets squeezed by .song-row-open's own flex:1 sibling. */
+.song-row-menu {
+  flex: none;
+}
+
+.song-row-menu-button {
+  border: none;
+  background: none;
+  /* The app's one accent color (--color-accent) — same purple as the Logo
+     and the active 8-count — at the user's explicit request, rather than
+     the plain muted-text every other small icon button in this app uses. */
+  color: var(--color-accent);
+  padding: 4px;
+  display: flex;
+  cursor: pointer;
+}
+
+/* Narrow variant of .dropdown-list, anchored to the RIGHT edge instead of
+   the left — this trigger sits at the far right of the row, so a left-
+   anchored menu (like .dropdown-list-speed's) would hang off past the
+   library's own column and risk clipping at the viewport edge. */
+.dropdown-list-song-menu {
+  left: auto;
+  right: 0;
+  width: 130px;
+}
+
+.dropdown-list-song-menu button {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dropdown-list-song-menu button:disabled {
+  color: var(--color-muted-text);
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The one destructive item in this menu — crimson to match every other
+   danger action in the app (ConfirmDialog's own confirm button, .error). */
+.song-row-menu-delete {
+  color: crimson;
+}
+
+/* Inline rename (Library.tsx's SongRow, while renaming): the title's own
+   spot swapped for a real input, sized/weighted to match .song-title
+   exactly so the row's height doesn't jump the moment editing starts. */
+.song-title-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--font-row-title-size);
+  font-weight: var(--font-row-title-weight);
+  color: inherit;
+  background-color: var(--color-input-bg);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-input);
+  padding: 1px 5px;
 }
 
 /* Screen swap: centered pill/chip segmented control. Audio songs never
@@ -1494,10 +1863,12 @@ body {
 .screen-tab,
 .song-bottom-tab,
 .import-button,
-.tap-enter,
+.redo-counts-button,
+.song-row-menu-button,
 .tap-actions button,
 .dropdown-list-speed button,
 .loop-snap-menu button,
+.dropdown-list-song-menu button,
 .control-select-label {
   position: relative;
 }
@@ -1509,10 +1880,12 @@ body {
 .screen-tab::after,
 .song-bottom-tab::after,
 .import-button::after,
-.tap-enter::after,
+.redo-counts-button::after,
+.song-row-menu-button::after,
 .tap-actions button::after,
 .dropdown-list-speed button::after,
 .loop-snap-menu button::after,
+.dropdown-list-song-menu button::after,
 .control-select-label::after {
   content: '';
   position: absolute;
@@ -1547,10 +1920,12 @@ body {
 .screen-tab:active,
 .song-bottom-tab:active,
 .import-button:active:not(:disabled),
-.tap-enter:active,
+.redo-counts-button:active:not(:disabled),
 .tap-actions button:active:not(:disabled),
 .control-select:active,
-.song-row:active:not(:disabled) {
+.song-row-open:active:not(:disabled),
+.song-row-menu-button:active,
+.dropdown-list-song-menu button:active:not(:disabled) {
   opacity: 0.6;
 }
 

@@ -22,12 +22,15 @@ export interface AccentOption {
 // original purple (L~0.56-0.68, C~0.14-0.25) so switching accent doesn't
 // also change how BOLD the app reads, only its hue.
 //
-// 'purple' reproduces the app's original literal --color-accent (#9333ea)
+// 'purple' reproduces the app's --color-accent default (index.css :root)
 // exactly, byte for byte — it's the default, and picking it back after
 // trying another option must be indistinguishable from never having opened
-// Settings at all.
+// Settings at all. Re-hued from the original vivid #9333ea to #8d41bc —
+// same ~310° hue as the user-supplied #b57edc, darkened/deepened from it,
+// then nudged slightly back up in lightness from the #7e30ab that landed
+// on — at their explicit request; the two must keep mirroring each other.
 export const ACCENT_OPTIONS: AccentOption[] = [
-  { id: 'purple', label: 'Purple', hex: '#9333ea' },
+  { id: 'purple', label: 'Purple', hex: '#8d41bc' },
   { id: 'rose', label: 'Rose', hex: '#c13b9f' },
   { id: 'crimson', label: 'Crimson', hex: '#d73240' },
   { id: 'amber', label: 'Amber', hex: '#cf7b26' },

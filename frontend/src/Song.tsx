@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Logo from './Logo'
 import Timeline from './Timeline'
 import VideoScreen from './VideoScreen'
+import { readCountDisplay, type CountDisplay } from './countDisplay'
 import { buildEightCountWindows } from './eightCount'
 import { useManualGrid, type ManualGridStore } from './manualGrid'
 import { useEngineTransport, useLoop, useSpeed } from './playback'
@@ -269,27 +270,15 @@ export default function Song({
     [analysis],
   )
 
-  const title = song.filename ?? song.id ?? song.md5
-
-  // The bottom pill nav is fixed (see index.css), so it never grows the
-  // document flow on its own; the scroll container's own bottom padding is
-  // measured off its real rendered height (+24px) instead of a guessed
-  // constant, so it stays correct across font/zoom/OS rendering differences.
-  const bottomTabsRef = useRef<HTMLDivElement>(null)
-  const [scrollBottomPad, setScrollBottomPad] = useState(0)
-  useLayoutEffect(() => {
-    const el = bottomTabsRef.current
-    if (!el) return
-    const update = () => setScrollBottomPad(el.offsetHeight + 24)
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  // Extension stripped for aesthetics, same as the Library row's own title
+  // (Library.tsx's SongRow) — song.id already has none (the backend derives
+  // it from the file's Path.stem), so only the song.filename branch ever
+  // needs the regex.
+  const title = song.filename ? song.filename.replace(/\.[^./]+$/, '') : (song.id ?? song.md5)
 
   return (
     <main className="song">
-      <div className="song-scroll" style={{ paddingBottom: scrollBottomPad }}>
+      <div className="song-scroll">
         <header className="song-head">
           <div className="song-head-left">
             <button className="song-back" onClick={onExit} aria-label="Back to library">
@@ -307,30 +296,42 @@ export default function Song({
         {analysis && !engine && !stemError && <LoadingStatus showSubtext={false} />}
         {engine && (
           // Keyed by the engine so the shell's hoisted state is rebuilt exactly
-          // when the audio it describes is — never on a screen swap.
-          <SongShell
-            key={analysis?.id ?? song.md5}
-            engine={engine}
-            manual={manual}
-            onsets={onsets}
-            mediaKind={song.media_kind}
-            videoUrl={analysis?.video_url ?? null}
-            darkMode={darkMode}
-          />
+          // when the audio it describes is — never on a screen swap. The nav
+          // bar below is INSIDE this same gate, not a sibling of it: `engine`
+          // truthy is exactly "the timeline view is actually present and
+          // loaded" (stems decoded, SongShell/Timeline mounted) — before that
+          // (the analysis fetch, then the stem decode) the nav must not show
+          // at all, only the two LoadingStatus screens above.
+          <>
+            <SongShell
+              key={analysis?.id ?? song.md5}
+              engine={engine}
+              manual={manual}
+              onsets={onsets}
+              mediaKind={song.media_kind}
+              videoUrl={analysis?.video_url ?? null}
+              darkMode={darkMode}
+            />
+            {/* Design's "Library / [song name]" tab bar. Only "Library"
+                actually navigates (onExit) — the song tab is the current
+                screen, shown active/inert, not a jump-back-in-from-elsewhere
+                control (that would need "last open song" state App.tsx
+                deliberately doesn't keep). A normal in-flow element, not
+                fixed to the viewport — at the user's explicit request, it
+                scrolls away with the rest of the page instead of hovering
+                over it, sitting directly below the Timeline card
+                (waveform/controls) rather than pinned to the bottom edge. */}
+            <nav className="song-bottom-tabs" aria-label="Navigate">
+              <button type="button" className="song-bottom-tab" onClick={onExit}>
+                Library
+              </button>
+              <button type="button" className="song-bottom-tab is-active" aria-current="page">
+                {title}
+              </button>
+            </nav>
+          </>
         )}
       </div>
-      {/* Design's "Library / [song name]" tab bar. Only "Library" actually
-          navigates (onExit) — the song tab is the current screen, shown
-          active/inert, not a jump-back-in-from-elsewhere control (that would
-          need "last open song" state App.tsx deliberately doesn't keep). */}
-      <nav className="song-bottom-tabs" ref={bottomTabsRef} aria-label="Navigate">
-        <button type="button" className="song-bottom-tab" onClick={onExit}>
-          Library
-        </button>
-        <button type="button" className="song-bottom-tab is-active" aria-current="page">
-          {title}
-        </button>
-      </nav>
     </main>
   )
 }
@@ -420,6 +421,12 @@ function SongShell({
     (time: number, direction: SnapDirection) => snapTime(time, snapMode, effectiveGrid, duration, direction),
     [snapMode, effectiveGrid, duration],
   )
+
+  // Same "initial value only" reasoning as snapMode just above — unlike
+  // snapMode, nothing in-song ever calls a setter for this, since Settings is
+  // its only control surface (no loop-handle-style override exists), so
+  // there is no setCountDisplay to hold onto here at all.
+  const [countDisplay] = useState<CountDisplay>(readCountDisplay)
   // The loop drives the ENGINE (native buffer-source looping). Same clock as
   // everything else, and one instance for every screen.
   const loop = useLoop(engine, snapToMode, duration)
@@ -462,6 +469,7 @@ function SongShell({
           onSnapModeChange={setSnapMode}
           tap={tap}
           darkMode={darkMode}
+          countDisplay={countDisplay}
         />
       ) : (
         <VideoScreen

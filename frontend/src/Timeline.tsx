@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useWavesurfer } from '@wavesurfer/react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin, { type Region } from 'wavesurfer.js/plugins/regions'
+import ConfirmDialog from './ConfirmDialog'
 import { HearControl, PlayPauseButton, SpeedControl, TimeReadout } from './controls'
-import { colorToken, type ColorToken } from './styles'
+import { colorToken } from './styles'
+import type { CountDisplay } from './countDisplay'
 import { findEightCountIndex, type EightCountWindow } from './eightCount'
 import {
   LOOP_BAND_EDGE_A,
@@ -24,22 +26,31 @@ import TapOverlay from './TapOverlay'
 // They are defined in types.ts now: the shell owns them, not this screen.
 export type { GridData, OnsetData } from './types'
 
-// Per-stem waveform coloring — invented; the design doesn't cover this. Only
-// the unplayed bars (waveColor) vary; progressColor/cursorColor stay constant
-// (a faded --color-waveform-progress purple / text) regardless of stemMode,
-// so the played/unplayed distinction reads the same no matter what's
-// isolated. 'drums'/'bass' deliberately reuse
-// the onset marker tokens (same instrument, same hue, in both the waveform
-// and its onset ticks); 'vocals'/'instrumental' get their own invented tokens
-// since nothing else in the app already means those. 'all' reuses the plain
-// waveform token — the released mix has no isolated instrument to tint it.
-const STEM_WAVE_TOKEN: Record<StemMode, ColorToken> = {
-  all: 'waveform',
-  vocals: 'stemVocals',
-  drums: 'onsetDrums',
-  bass: 'onsetBass',
-  instrumental: 'stemInstrumental',
+// The redo-row's glyph: a plain refresh/redo arc, currentColor so it always
+// matches whatever text color the ghost button is currently drawn in
+// (secondary, same as the label beside it) — same trick SpeedControl's icon
+// uses.
+function RedoIcon() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+      <path
+        d="M20 4v5h-5"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
+
+// The waveform is plain grey (the 'waveform' token) no matter which stem is
+// isolated — at the user's explicit request, reverting an earlier per-stem
+// tint (waveColor swapping to a vocals/drums/bass/instrumental hue on every
+// Hear change). progressColor/cursorColor were already constant regardless
+// of stemMode; this just brings waveColor in line with them, so switching
+// what you hear never changes what the waveform looks like.
 
 interface TimelineProps {
   // The fully-loaded stem engine: audio source, clock authority, and peaks
@@ -78,6 +89,12 @@ interface TimelineProps {
   // Later layers (subdivisions, onset overlays) must position themselves via
   // this instance's own time↔pixel mapping — never independent coordinate math.
   onReady?: (wavesurfer: WaveSurfer) => void
+  // How far below the whole 1..8 counts to subdivide — see countDisplay.ts.
+  // Read once at Song mount (Settings' only control surface for it), so this
+  // never changes mid-song; still threaded as a normal prop rather than read
+  // off a hook in here, same as every other piece of Song-owned state on this
+  // page.
+  countDisplay: CountDisplay
 }
 
 // A beat's pulse tick is suppressed (not drawn) if a drum/bass onset lands
@@ -125,17 +142,21 @@ const SLICE_EIGHT_COUNTS = 2
 
 // The audio waveform's OWN drawn height, in px. Briefly shrunk 33% (to 64) at
 // the user's explicit request, then reverted back to 96, then grown 33% from
-// THAT (96 * 1.33 = 127.68, rounded to 128) — this is "the overall timeline"
-// getting bigger per that request, consistently with the same box this
-// constant has meant every other time "the timeline" came up (e.g. the
-// WAVEFORM_BAR_FRACTION 60/40 split just below is 60/40 of THIS figure, not
-// of TIMELINE_TRACK_HEIGHT). COUNT_LABEL_BAND_HEIGHT deliberately does NOT
-// grow alongside it — the request was to grow the timeline, not the label
-// band sitting above it, and 22px was already comfortable for its 11px/9px
-// text. Every grid/onset/loop-marker region below still positions itself
-// relative to this figure (via waveformPct below where it matters), so they
-// all rescale automatically with no other change whenever this is retuned.
-const WAVEFORM_HEIGHT = 128
+// THAT (96 * 1.33 = 127.68, rounded to 128), then grown a further 25% from
+// THAT (128 * 1.25 = 160) — this is "the overall timeline" getting bigger
+// (specifically taller, per that latest request — a separate attempt at
+// growing it WIDER via the card's own CSS width was tried and reverted; this
+// constant is the one that actually means "the timeline" every time it's
+// come up), consistently with the same box this constant has meant every
+// other time (e.g. the WAVEFORM_BAR_FRACTION 60/40 split just below is 60/40
+// of THIS figure, not of TIMELINE_TRACK_HEIGHT). COUNT_LABEL_BAND_HEIGHT
+// deliberately does NOT grow alongside it — the request was to grow the
+// timeline, not the label band sitting above it, and 22px was already
+// comfortable for its 11px/9px text. Every grid/onset/loop-marker region
+// below still positions itself relative to this figure (via waveformPct
+// below where it matters), so they all rescale automatically with no other
+// change whenever this is retuned.
+const WAVEFORM_HEIGHT = 160
 
 // A band ABOVE the waveform, reserved for the 1..8/"&" count labels — at the
 // user's explicit request, reversed from an earlier below-the-waveform
@@ -316,6 +337,23 @@ const SUBDIVISION_LABEL_STYLE: Partial<CSSStyleDeclaration> = {
   color: 'var(--color-count-label-text)',
 }
 
+// Sub-beat fractions between two consecutive beats, and the letter each one
+// is labeled with, per countDisplay mode (countDisplay.ts) — 'whole' gets
+// none (just the integer counts), 'and' the single half-beat "&", 'e-and-a'
+// the full quarter-beat "1 e & a 2 e & a ..." run. Shared by both the tick
+// hairlines (the subdivisions memo below, ticks only — it only needs the
+// fraction, not the letter) and the grid effect's own text labels further
+// down, so the two layers can never disagree about where a sub-beat sits.
+const SUB_BEAT_FRACTIONS: Record<CountDisplay, Array<[number, string]>> = {
+  whole: [],
+  and: [[0.5, '&']],
+  'e-and-a': [
+    [0.25, 'e'],
+    [0.5, '&'],
+    [0.75, 'a'],
+  ],
+}
+
 // Tap markers: where the user's taps landed, in a hue used nowhere else
 // (green — clear of drums-red, bass-blue, and the accent purple now shared by
 // Layer 6's active-block highlight and the loop band). Full height and above
@@ -430,14 +468,27 @@ function Timeline({
   tap,
   onReady,
   darkMode,
+  countDisplay,
 }: TimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const viewportTrackRef = useRef<HTMLDivElement>(null)
   // Session-only visibility toggles for the onset overlays; both start off,
   // so the baseline view is pulse ticks + 8-count shading with no markers.
   // These are the one kind of state this screen legitimately owns: they change
   // nothing about the song, only what this view draws.
   const [bassVisible, setBassVisible] = useState(false)
   const [drumsVisible, setDrumsVisible] = useState(false)
+  // Which slice of the WHOLE song the zoomed .timeline-waveform is currently
+  // scrolled to — a time range, not a fraction, so it lines up directly with
+  // duration/currentTime everywhere else. Drives .timeline-viewport below,
+  // this screen's own always-visible stand-in for wavesurfer's native
+  // scrollbar (see that div's own comment for why the native one isn't used
+  // as-is). Starts full-width; the effect below corrects it once wavesurfer
+  // reports an actual scroll position.
+  const [viewport, setViewport] = useState<{ start: number; end: number }>({
+    start: 0,
+    end: duration,
+  })
   // Which 8-count window the playhead is in (null = outside every window),
   // and the grid's RegionsPlugin instance so the Layer 6 effect can add its
   // regions to the SAME plugin — one coordinate space, one paint layer.
@@ -445,19 +496,21 @@ function Timeline({
   const [gridRegions, setGridRegions] = useState<RegionsPlugin | null>(null)
 
   // waveColor/progressColor/cursorColor MUST be computed exactly once, at
-  // mount, and never again from a live stemMode/darkMode read: @wavesurfer/
-  // react's useWavesurfer effect depends on every option VALUE (see its
-  // source), so an option that changes value between renders tears down and
-  // recreates the whole WaveSurfer instance — destroying every RegionsPlugin
-  // region with it. That is exactly the failure this file's peaks comment
-  // above already warns about for stem switching ("never via options"); the
-  // same rule applies to color. Stem- and theme-driven recoloring instead
-  // goes through wavesurfer.setOptions() in the effect below, the one
-  // wavesurfer API that updates options AND repaints without recreating
-  // anything.
+  // mount, and never again from a live darkMode read: @wavesurfer/react's
+  // useWavesurfer effect depends on every option VALUE (see its source), so
+  // an option that changes value between renders tears down and recreates
+  // the whole WaveSurfer instance — destroying every RegionsPlugin region
+  // with it. That is exactly the failure this file's peaks comment above
+  // already warns about for stem switching ("never via options"); the same
+  // rule applies to color. Theme-driven recoloring instead goes through
+  // wavesurfer.setOptions() in the effect below, the one wavesurfer API that
+  // updates options AND repaints without recreating anything. waveColor
+  // itself never varies by stemMode (see the comment above this component) —
+  // it's threaded through that same setOptions call purely so a dark-mode
+  // toggle still repaints it, not because it ever changes value.
   const initialWaveColors = useMemo(
     () => ({
-      waveColor: colorToken(STEM_WAVE_TOKEN[DEFAULT_STEM_MODE]),
+      waveColor: colorToken('waveform'),
       progressColor: colorToken('waveformProgress'),
       cursorColor: colorToken('text'),
     }),
@@ -493,6 +546,15 @@ function Timeline({
     // never a hand-rolled scroll transform (single time↔pixel authority).
     autoScroll: true,
     autoCenter: true,
+    // The scroll STAYS wavesurfer's own — only its native scrollbar chrome
+    // is suppressed. .timeline-viewport (below) is the one visible control
+    // for it now: an always-visible, ordinary DOM element we draw and
+    // position ourselves, unlike the native bar, which lives inside
+    // wavesurfer's shadow DOM and inherits the OS's overlay-scrollbar
+    // auto-hide behavior. Two controls for the one scroll position would
+    // just be a second, worse copy of the one below — at the user's
+    // explicit request.
+    hideScrollbar: true,
     ...initialWaveColors,
   })
 
@@ -517,6 +579,13 @@ function Timeline({
   useEffect(() => {
     if (wavesurfer && isReady) onReady?.(wavesurfer)
   }, [wavesurfer, isReady, onReady])
+
+  // Gates tap.enter behind a confirmation — see the ConfirmDialog rendered
+  // below the card. "Exit tap mode" (tap.exit, wired directly on the button
+  // when a session is already open) is NOT gated: it discards nothing, it
+  // just backs out of an already-open tap session and leaves whatever saved
+  // grid existed before untouched.
+  const [confirmRedoOpen, setConfirmRedoOpen] = useState(false)
 
   // Per-tick absorption tags, computed once per analysis: nearBass/nearDrums
   // mark beats with a bass/drum onset within ABSORPTION_TOLERANCE_MS — the
@@ -546,10 +615,11 @@ function Timeline({
     )
   }, [onsets, duration])
 
-  // Subdivisions: ONE tick at the temporal midpoint of each consecutive beat
-  // pair — interpolated in TIME, so wavesurfer still owns time→pixel and
-  // zoom/scroll come for free. Half-beat only (quarter-beat "e & a" is a
-  // separate layer, deliberately not built here).
+  // Subdivisions: a tick at every sub-beat fraction (SUB_BEAT_FRACTIONS,
+  // driven by countDisplay — none in 'whole', the half-beat midpoint in
+  // 'and', the three quarter-beat points in 'e-and-a') of each consecutive
+  // beat pair — interpolated in TIME, so wavesurfer still owns time→pixel
+  // and zoom/scroll come for free.
   //
   // The last beat has no successor, so it gets no trailing subdivision — the
   // loop stops at beats.length - 1 rather than extrapolating past the track.
@@ -569,15 +639,19 @@ function Timeline({
   // drum-dense block it deletes most of the grid, and a metric ruler with
   // holes in it is not a ruler.
   const subdivisions = useMemo(() => {
-    if (!grid || !duration || grid.beats.length < 2) return null
+    const fractions = SUB_BEAT_FRACTIONS[countDisplay]
+    if (!grid || !duration || grid.beats.length < 2 || fractions.length === 0) return null
     const { beats } = grid
-    const midpoints: number[] = []
+    const points: number[] = []
     for (let i = 0; i < beats.length - 1; i++) {
-      const time = (beats[i] + beats[i + 1]) / 2
-      if (time < duration) midpoints.push(time)
+      const span = beats[i + 1] - beats[i]
+      for (const [fraction] of fractions) {
+        const time = beats[i] + span * fraction
+        if (time < duration) points.push(time)
+      }
     }
-    return midpoints
-  }, [grid, duration])
+    return points
+  }, [grid, duration, countDisplay])
 
   // The RegionsPlugin is created ONCE per wavesurfer instance and outlives every
   // layer drawn into it. It deliberately does NOT get torn down when the grid
@@ -860,6 +934,50 @@ function Timeline({
     return wavesurfer.on('timeupdate', track)
   }, [wavesurfer, isReady, windows])
 
+  // Mirrors wavesurfer's own 'scroll' event (already in time units — see
+  // wavesurfer.js's own listener, which multiplies the renderer's raw
+  // fractions by duration before re-emitting) into viewport state. Fires on
+  // every autoScroll tick during playback and on every manual drag of
+  // .timeline-viewport below, so the two stay one coordinate space.
+  //
+  // 'scroll' alone isn't enough — it only fires when scrollLeft itself
+  // moves, but the FIXED ZOOM effect below (applyZoom, which is what makes
+  // this pane scrollable at all — until it runs, the waveform fills the
+  // container with nothing to scroll and full-width IS correct) can grow
+  // scrollWidth without moving scrollLeft at all: zooming in while already
+  // sitting at scrollLeft 0 stays at scrollLeft 0, so no 'scroll' event
+  // fires even though the visible SLICE just shrank drastically. Subscribing
+  // to wavesurfer's 'zoom' event too (fired by every applyZoom() call,
+  // including its ResizeObserver-triggered re-zooms) closes that gap. The
+  // sync() call up front covers the remaining case — wavesurfer's initial
+  // autoCenter positioning runs before this effect gets a chance to attach
+  // either listener, so that first real change happens unheard. Reading
+  // getWrapper().parentElement directly (the same scroll container
+  // seekAndCenter already reaches into) sidesteps both events and gets the
+  // CURRENT position no matter when it was set. useLayoutEffect (not
+  // useEffect — same reasoning as Song.tsx's scrollBottomPad measure) so
+  // that correction lands before paint: a plain useEffect would still show
+  // one full-width frame first.
+  useLayoutEffect(() => {
+    if (!wavesurfer || !isReady) return
+    const sync = () => {
+      const scrollEl = wavesurfer.getWrapper().parentElement
+      if (!scrollEl || !duration || scrollEl.scrollWidth <= 0) return
+      const { scrollLeft, scrollWidth, clientWidth } = scrollEl
+      setViewport({
+        start: (scrollLeft / scrollWidth) * duration,
+        end: (Math.min(scrollLeft + clientWidth, scrollWidth) / scrollWidth) * duration,
+      })
+    }
+    sync()
+    const unsubScroll = wavesurfer.on('scroll', (start, end) => setViewport({ start, end }))
+    const unsubZoom = wavesurfer.on('zoom', sync)
+    return () => {
+      unsubScroll()
+      unsubZoom()
+    }
+  }, [wavesurfer, isReady, duration])
+
   // Layer 6: highlight the active 8-count and number its beats 1..n. Extends
   // the Layer 2 regions (same plugin, wavesurfer-owned coordinates), so Layer
   // 4 scroll applies for free. Re-renders only when the active index or the
@@ -932,36 +1050,43 @@ function Timeline({
       added.push(label)
     }
 
-    // "&" on the midpoints BETWEEN beats, giving "1 & 2 & ... 7 & 8 &" —
-    // beatCount ampersands, including the trailing one after count 8 (the
-    // midpoint between this block's last beat and the very next beat in the
-    // grid, whichever block that belongs to — normally the next block's own
-    // count 1). At the user's explicit request: that trailing "&" was
-    // previously skipped (the loop stopped at beatCount - 1, reasoning the
-    // label run "ends on 8"), which silently dropped the one count dancers
-    // actually rely on most to catch the next phrase's downbeat. A ragged
-    // final group still only gets the "&"s that actually exist between (and
-    // just after) its beats — nextTime is undefined past the grid's last
-    // beat, so the very end of the song simply has none to add, unpadded.
+    // Sub-beat labels BETWEEN beats — "&" in 'and' mode ("1 & 2 & ... 7 & 8
+    // &"), "e"/"&"/"a" in 'e-and-a' mode ("1 e & a 2 e & a ..."), none in
+    // 'whole' (SUB_BEAT_FRACTIONS is empty there, so this loop's inner loop
+    // never runs and nothing is added) — beatCount runs of them, including
+    // the trailing one(s) after count 8 (between this block's last beat and
+    // the very next beat in the grid, whichever block that belongs to —
+    // normally the next block's own count 1). At the user's explicit
+    // request: that trailing "&" was previously skipped (the loop stopped at
+    // beatCount - 1, reasoning the label run "ends on 8"), which silently
+    // dropped the one count dancers actually rely on most to catch the next
+    // phrase's downbeat. A ragged final group still only gets the labels
+    // that actually exist between (and just after) its beats — nextTime is
+    // undefined past the grid's last beat, so the very end of the song
+    // simply has none to add, unpadded.
     for (let i = 0; i < win.beatCount; i++) {
+      const startTime = grid.beats[win.firstBeat + i]
       const nextTime = grid.beats[win.firstBeat + i + 1]
       if (nextTime === undefined) continue
-      const time = (grid.beats[win.firstBeat + i] + nextTime) / 2
-      if (!(time < duration)) continue
-      const label = gridRegions.addRegion({
-        start: time,
-        end: time,
-        drag: false,
-        resize: false,
-        content: '&',
-      })
-      styleRegion(label.element, {
-        pointerEvents: 'none',
-        border: 'none',
-        zIndex: '6',
-      })
-      if (label.content) Object.assign(label.content.style, SUBDIVISION_LABEL_STYLE)
-      added.push(label)
+      const span = nextTime - startTime
+      for (const [fraction, text] of SUB_BEAT_FRACTIONS[countDisplay]) {
+        const time = startTime + span * fraction
+        if (!(time < duration)) continue
+        const label = gridRegions.addRegion({
+          start: time,
+          end: time,
+          drag: false,
+          resize: false,
+          content: text,
+        })
+        styleRegion(label.element, {
+          pointerEvents: 'none',
+          border: 'none',
+          zIndex: '6',
+        })
+        if (label.content) Object.assign(label.content.style, SUBDIVISION_LABEL_STYLE)
+        added.push(label)
+      }
     }
 
     return () => {
@@ -972,7 +1097,7 @@ function Timeline({
         if (!region.isRemoved) region.remove()
       })
     }
-  }, [gridRegions, grid, windows, currentEightCountIndex, duration, tap.tapping])
+  }, [gridRegions, grid, windows, currentEightCountIndex, duration, tap.tapping, countDisplay])
 
   // FIXED zoom (the app's only zoom — runtime zoom in/out is out of scope):
   // set wavesurfer's OWN zoom level once so SLICE_EIGHT_COUNTS eight-counts
@@ -1002,15 +1127,17 @@ function Timeline({
     return () => observer.disconnect()
   }, [wavesurfer, isReady, grid])
 
-  // Stem mode → (a) audible gains, ramped inside the engine, (b) the
+  // Stem mode → (a) audible gains, ramped inside the engine, and (b) the
   // rendered waveform's peak buffer, swapped by handing the renderer the
   // mode's precomputed buffer directly — the same internal path zoom() takes,
-  // so regions survive untouched — and (c), now, the waveform's colors.
-  // Beats, 8-counts, onsets, count labels, and subdivisions are still
-  // properties of the TRACK, not the stem, and none of THEIR effects depend
-  // on stemMode; only the waveform's own paint does.
+  // so regions survive untouched. The waveform's COLORS do NOT depend on
+  // stemMode — see this component's top comment; waveColor is always the
+  // plain grey 'waveform' token here, same as initialWaveColors. Beats,
+  // 8-counts, onsets, count labels, and subdivisions are properties of the
+  // TRACK, not the stem, and none of THEIR effects depend on stemMode either;
+  // only the waveform's own peak buffer does.
   //
-  // darkMode is also a dependency for exactly one reason: it is the explicit
+  // darkMode is a dependency for exactly one reason: it is the explicit
   // redraw path required because wavesurfer never re-reads waveColor/
   // progressColor/cursorColor on its own — they're canvas fillStyle values,
   // baked in at the moment they're set, not a live CSS binding the way a DOM
@@ -1022,7 +1149,9 @@ function Timeline({
   // matters: that object's every value is a dependency of @wavesurfer/
   // react's create-effect, so a changed value there tears down and recreates
   // the whole instance (see initialWaveColors' comment) instead of just
-  // repainting it.
+  // repainting it. stemMode stays a dependency too, since (b) above still
+  // needs to re-run on every mode switch even though the colors it sets
+  // alongside no longer vary with it.
   //
   // Ordering: setOptions's own internal repaint runs against the OLD peak
   // buffer (whatever was already loaded), immediately followed by
@@ -1036,7 +1165,7 @@ function Timeline({
     const display = engine.displayBufferFor(stemMode)
     if (wavesurfer && isReady) {
       wavesurfer.setOptions({
-        waveColor: colorToken(STEM_WAVE_TOKEN[stemMode]),
+        waveColor: colorToken('waveform'),
         progressColor: colorToken('waveformProgress'),
         cursorColor: colorToken('text'),
       })
@@ -1148,6 +1277,20 @@ function Timeline({
     }
   }
 
+  // Dragging .timeline-viewport moves the zoomed waveform's scroll position
+  // (which slice of the song is on screen) — it does NOT move the playhead;
+  // that is seekAndCenter's job, above, on a different control entirely.
+  // setScrollTime places the LEFT edge of the visible window at the given
+  // time, same coordinate space wavesurfer's own 'scroll' event reports back
+  // through the viewport effect.
+  const scrollViewTo = (clientX: number) => {
+    const el = viewportTrackRef.current
+    if (!wavesurfer || !el || !duration) return
+    const rect = el.getBoundingClientRect()
+    const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    wavesurfer.setScrollTime(fraction * duration)
+  }
+
   // The design's "Onsets" select (Off/Bass/Drums/Both) is a VIEW over
   // bassVisible/drumsVisible, not a third piece of state: it reads as a
   // derived value and writes by dispatching to the same two setters the
@@ -1185,6 +1328,48 @@ function Timeline({
           }
         />
         <div className="timeline-card-divider" />
+        {/*
+          The zoomed .timeline-waveform above scrolls (autoScroll/autoCenter)
+          to keep the playhead in view — wavesurfer's own native scrollbar
+          for that pane is suppressed (hideScrollbar: true, above) since it
+          lived inside wavesurfer's shadow DOM, confined to that pane's own
+          bottom edge, and inherited the OS's overlay-scrollbar behavior:
+          macOS showed it only while actively scrolling, i.e. only while
+          playing. This bar is the OWN-BUILT replacement: rendered
+          unconditionally (no isPlaying/isReady gate, so it stays visible
+          regardless of play state) and placed here, directly above
+          TimelineOverview (the position/playhead bar below it) — at the
+          user's explicit request, matching where the native one used to
+          sit. It does NOT move the playhead; that's TimelineOverview's own
+          job via seekAndCenter. Dragging this one instead pans which SLICE
+          of the whole song the waveform above is scrolled to.
+        */}
+        <div className="timeline-viewport">
+          <div
+            ref={viewportTrackRef}
+            className="timeline-viewport-track"
+            role="slider"
+            aria-label="Visible range"
+            aria-valuemin={0}
+            aria-valuemax={duration}
+            aria-valuenow={viewport.start}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
+              scrollViewTo(e.clientX)
+            }}
+            onPointerMove={(e) => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId)) scrollViewTo(e.clientX)
+            }}
+          >
+            <div
+              className="timeline-viewport-thumb"
+              style={{
+                left: `${duration ? (viewport.start / duration) * 100 : 0}%`,
+                width: `${duration ? ((viewport.end - viewport.start) / duration) * 100 : 100}%`,
+              }}
+            />
+          </div>
+        </div>
         <TimelineOverview
           duration={duration}
           currentTime={transport.currentTime}
@@ -1194,66 +1379,79 @@ function Timeline({
           onSnapModeChange={onSnapModeChange}
         />
         <div className="timeline-controls">
-          <PlayPauseButton transport={transport} disabled={!isReady} />
-          <TimeReadout transport={transport} grid={grid} windows={windows} />
           {/*
-            The design tucks this button below-left of the row via a negative
-            margin, sized for its fixed 407px-wide frame. At the 380px width
-            this app is verified against, the row wraps to a second line
-            (Onsets/Hear don't fit next to play+time+count) and that negative
-            offset then lands ON TOP of the wrapped line instead of empty
-            space beneath it — so it renders inline here instead. Only the
-            button's own look (icon, active/inactive color) is a design
-            requirement; its exact offset position was not (README only
-            mocks the toggle, not a picker or its placement).
+            Top row: Play/TimeReadout/SpeedControl on the left, Hear pushed
+            to the right (alignEnd) — swapped with Onsets, at the user's
+            explicit request; Onsets now lives on the bottom row instead (see
+            below). The design tucks the speed dial below-left of the row
+            via a negative margin, sized for its fixed 407px-wide frame; at
+            the 380px width this app is verified against that offset would
+            land on top of content instead of empty space, so it renders
+            inline here instead. Only the button's own look (icon, active/
+            inactive color) is a design requirement; its exact offset
+            position was not (README only mocks the toggle, not a picker or
+            its placement).
           */}
-          <SpeedControl speed={speed} />
+          <div className="timeline-controls-row">
+            <PlayPauseButton transport={transport} disabled={!isReady} />
+            <TimeReadout transport={transport} grid={grid} windows={windows} />
+            <SpeedControl speed={speed} />
+            <HearControl stemMode={stemMode} onStemModeChange={onStemModeChange} alignEnd />
+          </div>
           {/*
-            Re-tap is PERMANENT: always here, next to the transport, never
-            locked away once a grid exists — not behind a settings menu and
-            not conditional on anything tripping. Users get the count wrong
-            sometimes and must be able to redo it without re-importing the
-            song. Hidden only during first run, where tap mode is already
-            forced open and there is no grid to exit back to.
+            Bottom row: Redo counts under Play/TimeReadout on the left. Onsets
+            under Hear on the right (marginLeft:auto, mirroring Hear's own
+            alignEnd above it) — swapped down here from the top row, at the
+            user's explicit request — so the two rows still read as two
+            aligned columns. Redo counts is PERMANENT: always here once a
+            grid exists — not behind a settings menu and not conditional on
+            anything tripping. Users get the count wrong sometimes and must
+            be able to redo it without re-importing the song. Hidden only
+            during first run, where tap mode is already forced open and
+            there is no grid to exit back to.
           */}
-          {hasSavedGrid && (
-            <button
-              className="tap-enter"
-              onClick={tap.tapping ? tap.exit : tap.enter}
-              disabled={!isReady}
-              aria-pressed={tap.tapping}
-            >
-              {tap.tapping ? 'Exit tap mode' : 'Re-tap the counts'}
-            </button>
-          )}
-          <label className="control-select-label" style={{ marginLeft: 'auto' }}>
-            Onsets
-            <select
-              className="control-select"
-              value={onsetSelectValue}
-              disabled={!onsets}
-              onChange={(e) => onOnsetSelectChange(e.target.value)}
-            >
-              <option value="off">Off</option>
-              <option value="bass" style={{ color: 'var(--color-onset-bass)' }}>
-                Bass
-              </option>
-              {/* Reads the -marker variant here, not the base token (unlike
-                  Bass just above, whose base and marker still share the
-                  same blue) — drums' marker was re-hued to red while its
-                  base token stayed green (still the drums STEM waveform
-                  color; see --color-onset-drums-marker's own comment for
-                  why those two are deliberately separate tokens), so
-                  reading the base here left this dropdown showing green
-                  for what's now a red marker. At the user's explicit
-                  request. */}
-              <option value="drums" style={{ color: 'var(--color-onset-drums-marker)' }}>
-                Drums
-              </option>
-              <option value="both">Both</option>
-            </select>
-          </label>
-          <HearControl stemMode={stemMode} onStemModeChange={onStemModeChange} />
+          <div className="timeline-controls-row">
+            {hasSavedGrid && (
+              <button
+                type="button"
+                className="redo-counts-button"
+                onClick={tap.tapping ? tap.exit : () => setConfirmRedoOpen(true)}
+                disabled={!isReady}
+                aria-pressed={tap.tapping}
+                aria-label={tap.tapping ? 'Exit tap mode' : 'Redo counts'}
+              >
+                <RedoIcon />
+                <span className="redo-counts-label">{tap.tapping ? 'Exit tap mode' : 'Redo counts'}</span>
+              </button>
+            )}
+            <label className="control-select-label" style={{ marginLeft: 'auto' }}>
+              Onsets
+              <select
+                className="control-select"
+                value={onsetSelectValue}
+                disabled={!onsets}
+                onChange={(e) => onOnsetSelectChange(e.target.value)}
+              >
+                <option value="off">Off</option>
+                <option value="bass" style={{ color: 'var(--color-onset-bass)' }}>
+                  Bass
+                </option>
+                {/* Reads the -marker variant here, not the base token (unlike
+                    Bass just above, whose base and marker still share the
+                    same blue) — drums' marker was re-hued to red while its
+                    base token stayed green (still the drums STEM waveform
+                    color; see --color-onset-drums-marker's own comment for
+                    why those two are deliberately separate tokens), so
+                    reading the base here left this dropdown showing green
+                    for what's now a red marker. At the user's explicit
+                    request. */}
+                <option value="drums" style={{ color: 'var(--color-onset-drums-marker)' }}>
+                  Drums
+                </option>
+                <option value="both">Both</option>
+              </select>
+            </label>
+          </div>
         </div>
         {loop.error && <p className="error">{loop.error}</p>}
       </div>
@@ -1276,6 +1474,17 @@ function Timeline({
           onCancel={hasSavedGrid ? tap.restart : tap.enter}
         />
       )}
+      <ConfirmDialog
+        open={confirmRedoOpen}
+        title="Redo counts"
+        body="This discards the current count grid. It can't be undone."
+        confirmLabel="Redo counts"
+        onCancel={() => setConfirmRedoOpen(false)}
+        onConfirm={() => {
+          setConfirmRedoOpen(false)
+          tap.enter()
+        }}
+      />
     </>
   )
 }

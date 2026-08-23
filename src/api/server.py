@@ -12,6 +12,7 @@ or:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -741,6 +742,69 @@ def list_library():
     order = {"ready": 0, "needs_tap": 1, "stems_evicted": 2}
     songs.sort(key=lambda s: (order[s["state"]], (s["filename"] or "").lower()))
     return {"songs": songs}
+
+
+class RenameTrack(BaseModel):
+    name: str
+
+
+@app.patch("/api/library/{md5}/rename")
+def rename_track(md5, payload: RenameTrack):
+    """Rename a song's source file on disk, keeping its extension.
+
+    Keyed by md5, not track_id: the whole point of md5-keying (see the
+    module docstring above _tracks_by_md5) is that a rename must not fork
+    the library entry, its grid, or its cache into a second row — this is
+    the one endpoint that deliberately changes the name that key maps to,
+    so it has to take the key itself, not the name being replaced.
+
+    Only the STEM is user-editable; the extension always follows the file
+    actually on disk, so a rename can never turn audio into a wrong-typed
+    video (or vice versa) by accident. Requires the source file to still be
+    here — an evicted entry has nothing to rename until its file comes back.
+    """
+    source = _tracks_by_md5().get(md5)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    new_stem = payload.name.strip()
+    if not new_stem:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    if "/" in new_stem or "\\" in new_stem or new_stem in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid name")
+
+    target = source.with_name(new_stem + source.suffix)
+    if target != source:
+        if target.exists():
+            raise HTTPException(status_code=409, detail="A track with that name already exists")
+        source.rename(target)
+
+    record = _write_manifest(target, md5)
+    return {"md5": md5, "id": target.stem, "filename": record["filename"]}
+
+
+@app.delete("/api/library/{md5}")
+def delete_track(md5):
+    """Permanently remove a song: source file, cached stems, tapped grid, and
+    the library manifest itself. Idempotent — safe to call on a row missing
+    any subset of these already (an evicted entry has no source file left,
+    for instance).
+
+    Unlike DELETE .../manual-grid, this also takes the SOURCE audio with
+    it — there is no recovery path afterward, not even by re-importing the
+    same bytes, since the manifest that would have reconnected them is gone
+    too. The frontend gates this behind a confirmation for exactly that
+    reason.
+    """
+    source = _tracks_by_md5().get(md5)
+    if source is not None:
+        source.unlink()
+    stems_dir = CACHE_DIR / md5
+    if stems_dir.exists():
+        shutil.rmtree(stems_dir)
+    (GRIDS_DIR / f"{md5}.json").unlink(missing_ok=True)
+    _manifest_path(md5).unlink(missing_ok=True)
+    return {"deleted": md5}
 
 
 @app.post("/api/import")

@@ -1,20 +1,23 @@
 import { useAccentColor } from './accentColor'
+import { COUNT_DISPLAY_LABELS, COUNT_DISPLAY_MODES, useCountDisplay } from './countDisplay'
 import { SNAP_MODE_LABELS, SNAP_MODES, useDefaultSnapMode } from './snap'
 import { toggleStyle } from './styles'
 
 // LEVEL 1 sibling of Library (App.tsx's View): its own screen, not a
 // dropdown — at the user's explicit request, reversed from an earlier
 // dropdown-popover version once it grew a second, unrelated option (beat
-// snapping joining accent color). Two independent settings read better as
-// sections on a screen than stacked in one small menu. No design mock covers
-// Settings at all (the redesign doesn't have one yet), so this screen's
-// layout is invented, same as the Timeline's own canvas palette elsewhere in
-// this app — kept deliberately plain (page head + two labeled sections) to
-// match the rest of the app's placeholder-styling-pending-a-design-pass
-// look (see e.g. SpeedControl's own comment in controls.tsx).
+// snapping joining accent color, then count display joining both). Independent
+// settings read better as sections on a screen than stacked in one small
+// menu. No design mock covers Settings at all (the redesign doesn't have one
+// yet), so this screen's layout is invented, same as the Timeline's own
+// canvas palette elsewhere in this app — kept deliberately plain (page head +
+// labeled sections) to match the rest of the app's
+// placeholder-styling-pending-a-design-pass look (see e.g. SpeedControl's own
+// comment in controls.tsx).
 export default function SettingsScreen({ onExit }: { onExit: () => void }) {
   const { accentId, setAccentId, options } = useAccentColor()
   const { defaultSnapMode, setDefaultSnapMode } = useDefaultSnapMode()
+  const { countDisplay, setCountDisplay } = useCountDisplay()
 
   return (
     <main className="settings">
@@ -65,6 +68,28 @@ export default function SettingsScreen({ onExit }: { onExit: () => void }) {
               style={toggleStyle(defaultSnapMode === mode, 'var(--color-accent)')}
             >
               {SNAP_MODE_LABELS[mode]}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">Count display</h2>
+        <p className="settings-section-note">
+          How the Timeline labels each beat — takes effect the next time you open a
+          song.
+        </p>
+        <div className="settings-snap-row" role="radiogroup" aria-label="Count display">
+          {COUNT_DISPLAY_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={countDisplay === mode}
+              onClick={() => setCountDisplay(mode)}
+              style={toggleStyle(countDisplay === mode, 'var(--color-accent)')}
+            >
+              {COUNT_DISPLAY_LABELS[mode]}
             </button>
           ))}
         </div>
