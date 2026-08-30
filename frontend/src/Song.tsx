@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { apiFetch } from './api'
 import Logo from './Logo'
 import Timeline from './Timeline'
 import VideoScreen from './VideoScreen'
@@ -181,7 +182,7 @@ export default function Song({
     setAnalysis(null)
     setError(null)
     setProgress(null)
-    fetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/analysis`)
+    apiFetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/analysis`)
       .then((res) => {
         if (!res.ok) throw new Error(`GET analysis -> HTTP ${res.status}`)
         return res.json() as Promise<Analysis>
@@ -212,7 +213,7 @@ export default function Song({
     if (!trackId || !loading) return
     let stale = false
     const poll = () => {
-      fetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/analysis/progress`)
+      apiFetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/analysis/progress`)
         .then((res) => (res.ok ? (res.json() as Promise<{ active: boolean; done?: number; total?: number }>) : null))
         .then((data) => {
           if (stale || !data || !data.active) return

@@ -1,0 +1,16 @@
+.git
+.claude
+.agents
+venv
+frontend/node_modules
+frontend/dist
+tracks
+cache
+data
+test_songs
+test_files
+old_functions
+design
+*.pyc
+__pycache__
+.env

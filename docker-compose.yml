@@ -1,0 +1,72 @@
+services:
+  backend:
+    build: .
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - tracks_data:/app/tracks
+      - cache_data:/app/cache
+      - app_data:/app/data
+    depends_on:
+      - redis
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  # Same image as backend, different command — see the Dockerfile's own
+  # comment for why they're one image rather than two. Runs the slow
+  # Demucs/beat_this pipeline (src/api/jobs.py's run_analysis_job) off the
+  # request path; a single worker processes one job at a time by default,
+  # which is the intentional v1 default for a cheap CPU-only box (see the
+  # plan doc), not a placeholder for "fix later" — scaling later is just
+  # adding more `worker` replicas against the same queue.
+  worker:
+    build: .
+    command: ["rq", "worker", "analysis", "-u", "redis://redis:6379/0"]
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - tracks_data:/app/tracks
+      - cache_data:/app/cache
+      - app_data:/app/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Job queue + cross-process analysis progress (src/progress_store.py). No
+  # persistent volume: everything written here is either an in-flight job
+  # (safely re-enqueued on the next request if lost — see jobs.py) or a
+  # progress percentage (harmless to lose, it just stops updating until the
+  # next poll after Redis is back).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  # Reverse proxy + TLS + static frontend, all one process. See the
+  # Caddyfile for the actual routing.
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Persists the Let's Encrypt certificate + ACME account across
+      # redeploys. Without this, every `docker compose up` after a rebuild
+      # would re-request a certificate and risk Let's Encrypt's rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  tracks_data:
+  cache_data:
+  app_data:
+  caddy_data:
+  caddy_config:

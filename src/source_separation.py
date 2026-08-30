@@ -8,17 +8,11 @@ from pydub import AudioSegment
 import hashlib
 from pathlib import Path
 import shutil
+from uuid import uuid4
+
+import progress_store
 
 EXPECTED_STEMS = ("drums.wav", "bass.wav", "vocals.wav", "other.wav")
-
-# Live Demucs separation progress, keyed by whatever identity the caller of
-# separate() asked to track it under (see progress_key on separate()).
-# Populated only while a separate() call is actually running Demucs — a
-# cache hit never touches this dict at all. Read by get_progress(), which the
-# API layer polls so the frontend's loading ring can track Demucs' own
-# per-chunk progress instead of faking one.
-_progress = {}
-_progress_lock = threading.Lock()
 
 
 def get_progress(key):
@@ -31,16 +25,14 @@ def get_progress(key):
     Demucs' own tqdm bar counts (see _ProgressTrackingTqdm below), not an
     estimate derived some other way.
     """
-    with _progress_lock:
-        state = _progress.get(key)
-        return dict(state) if state is not None else None
+    return progress_store.get_progress(key)
 
 
 _tracking_key = threading.local()
 
 
 class _ProgressTrackingTqdm(tqdm.tqdm):
-    """tqdm.tqdm, plus publishing every update() through get_progress().
+    """tqdm.tqdm, plus publishing every update() through progress_store.
 
     demucs.apply.apply_model() draws its own CLI progress bar by wrapping its
     list of per-chunk futures in exactly one call: tqdm.tqdm(futures, ...)
@@ -66,20 +58,20 @@ class _ProgressTrackingTqdm(tqdm.tqdm):
     def update(self, n=1):
         result = super().update(n)
         if self._progress_key is not None and self.total:
-            with _progress_lock:
-                _progress[self._progress_key] = {"done": self.n, "total": self.total}
+            progress_store.set_progress(self._progress_key, self.n, self.total)
         return result
 
 
 @contextlib.contextmanager
 def _tracking_demucs_progress(key):
-    """Report `key`'s Demucs progress via get_progress() for one separate() call.
+    """Report `key`'s Demucs progress via progress_store for one separate() call.
 
     Patches the real tqdm.tqdm that demucs.apply imported (demucs.apply.main
     hardcodes progress=True, so this constructor always gets called on a
     separation run) and restores it afterward, whether the run succeeded or
-    raised. The entry under `key` is popped in the same finally so a finished
-    or failed run never leaves a stale percentage for a later poll to find.
+    raised. The entry under `key` is cleared in the same finally so a
+    finished or failed run never leaves a stale percentage for a later poll
+    to find.
     """
     _tracking_key.key = key
     original_tqdm = demucs.apply.tqdm.tqdm
@@ -89,13 +81,14 @@ def _tracking_demucs_progress(key):
     finally:
         demucs.apply.tqdm.tqdm = original_tqdm
         _tracking_key.key = None
-        with _progress_lock:
-            _progress.pop(key, None)
+        progress_store.clear_progress(key)
 
 # Root of the per-file stem cache, relative to the process CWD (the repo root
-# in every real entry point). A single module-level binding — not an inline
-# literal — so the test suite can point it at a temp directory and never
-# touch the real cache the API server serves stems from.
+# in every real entry point), used whenever a caller doesn't pass its own
+# cache_root to separate() (see below) — every real caller in the multi-user
+# app does, since stems live under a per-user subtree; this default exists so
+# the test suite can point it at a temp directory and never touch the real
+# cache the API server serves stems from.
 CACHE_ROOT = Path("cache/stems")
 
 def _hash_file(path):
@@ -117,19 +110,12 @@ def _hash_file(path):
 
     return hash_object.hexdigest()
 
-def _is_cached(file_hash):
-    """Check whether a complete set of cached stems exists for a file hash.
+def _stems_complete(cache_dir):
+    """Whether cache_dir holds a complete set of the expected stems.
 
     A cache entry is only considered valid if every stem in EXPECTED_STEMS
     is present, so a partial/interrupted run does not falsely signal a hit.
-
-    Args:
-        file_hash: The MD5 hash returned by _hash_file().
-
-    Returns:
-        True if CACHE_ROOT/<file_hash>/ contains all expected stems, else False.
     """
-    cache_dir = CACHE_ROOT / file_hash
     if not cache_dir.exists():
         return False
 
@@ -139,12 +125,24 @@ def _is_cached(file_hash):
 
     return True
 
-def separate(audio_path, progress_key=None):
+def _is_cached(file_hash):
+    """Check whether a complete set of cached stems exists for a file hash,
+    under the module-level CACHE_ROOT.
+
+    Args:
+        file_hash: The MD5 hash returned by _hash_file().
+
+    Returns:
+        True if CACHE_ROOT/<file_hash>/ contains all expected stems, else False.
+    """
+    return _stems_complete(CACHE_ROOT / file_hash)
+
+def separate(audio_path, progress_key=None, cache_root=None):
     """Run Demucs 4-stem separation on an audio file, with caching.
 
-    The audio file is hashed and stems are written to cache/stems/<hash>/.
-    If a complete cached set already exists for this file, Demucs is skipped
-    and the cached paths are returned directly.
+    The audio file is hashed and stems are written to
+    <cache_root>/<hash>/. If a complete cached set already exists for this
+    file, Demucs is skipped and the cached paths are returned directly.
 
     Args:
         audio_path: Path to the audio file.
@@ -156,6 +154,11 @@ def separate(audio_path, progress_key=None):
             separately-hashed audio — should pass that identity explicitly so
             a progress poll keyed on it actually finds this run. Ignored on a
             cache hit: there is no Demucs run to report progress for.
+        cache_root: Directory stems are cached under, as <cache_root>/<hash>/.
+            Defaults to the module-level CACHE_ROOT. The multi-user API
+            passes each user's own cache/stems/<user_id>/ directory here, so
+            two users uploading identical audio each get their own Demucs
+            run and their own stem cache rather than silently sharing one.
 
     Returns:
         A dictionary mapping stem names ("vocals", "drums", "bass", "other")
@@ -174,42 +177,65 @@ def separate(audio_path, progress_key=None):
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"File not found: {audio_path}")
 
+    root = Path(cache_root) if cache_root is not None else CACHE_ROOT
     file_hash = _hash_file(audio_path)
-    cache_dir = CACHE_ROOT / file_hash
+    cache_dir = root / file_hash
 
-    if _is_cached(file_hash):
+    if _stems_complete(cache_dir):
         stems = {}
         for stem in ["vocals", "drums", "bass", "other"]:
             stems[stem] = str(cache_dir / f"{stem}.wav")
 
         return stems
 
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Demucs writes into a uniquely-named STAGING directory, never cache_dir
+    # itself, until the whole run has succeeded. Two requests racing on the
+    # same uncached file (the API has no per-track lock at this layer — see
+    # jobs.py for the higher-level dedup that makes this rare in practice,
+    # not impossible) used to both write into, and shutil.move out of, the
+    # same cache_dir; the loser's move would raise FileNotFoundError once the
+    # winner had already relocated the files out from under it. Isolating
+    # each run in its own staging directory turns that race into harmless
+    # redundant computation at worst — see the _stems_complete recheck below.
+    root.mkdir(parents=True, exist_ok=True)
+    staging_dir = root / f"{file_hash}.tmp-{uuid4().hex}"
+    staging_dir.mkdir(parents=True)
 
-    with _tracking_demucs_progress(progress_key if progress_key is not None else file_hash):
-        demucs.separate.main([
-            "-n", "htdemucs",
-            "-o", str(cache_dir),
-            audio_path
-        ])
+    try:
+        with _tracking_demucs_progress(progress_key if progress_key is not None else file_hash):
+            demucs.separate.main([
+                "-n", "htdemucs",
+                "-d", "cpu",
+                "-o", str(staging_dir),
+                audio_path
+            ])
 
-    track_name = os.path.splitext(os.path.basename(audio_path))[0]
-    stem_dir = os.path.join(cache_dir, "htdemucs", track_name)
+        track_name = os.path.splitext(os.path.basename(audio_path))[0]
+        stem_dir = os.path.join(staging_dir, "htdemucs", track_name)
 
-    stems = {}
-    for stem in ["vocals", "drums", "bass", "other"]:
-        path = os.path.join(stem_dir, f"{stem}.wav")
-        if os.path.exists(path):
-            new_path = cache_dir / f"{stem}.wav"
+        staged_stems = {}
+        for stem in ["vocals", "drums", "bass", "other"]:
+            path = os.path.join(stem_dir, f"{stem}.wav")
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Expected stem '{stem}' not found at {path}")
+            new_path = staging_dir / f"{stem}.wav"
             shutil.move(path, new_path)
-            stems[stem] = str(new_path)
-        else:
-            raise FileNotFoundError(f"Expected stem '{stem}' not found at {path}")
+            staged_stems[stem] = new_path
 
-    (cache_dir / "htdemucs" / track_name).rmdir()
-    (cache_dir / "htdemucs").rmdir()
+        (staging_dir / "htdemucs" / track_name).rmdir()
+        (staging_dir / "htdemucs").rmdir()
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
 
-    return stems
+    if _stems_complete(cache_dir):
+        # Another caller finished first while we were computing — discard
+        # our redundant work rather than clobbering the winner's result.
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    else:
+        staging_dir.replace(cache_dir)  # atomic rename, same filesystem
+
+    return {stem: str(cache_dir / f"{stem}.wav") for stem in ["vocals", "drums", "bass", "other"]}
 
 def get_stem(stems, name):
     """Get the path to a specific stem.

@@ -1,0 +1,15 @@
+# Builds the SPA and serves it — plus /tos.html and, via reverse_proxy, the
+# backend — with Caddy. See the Caddyfile for the routing; see the plan doc
+# for why Caddy over nginx+certbot (automatic Let's Encrypt with far less
+# config for a single-domain deployment).
+
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /app/dist /srv/frontend
+COPY Caddyfile /etc/caddy/Caddyfile

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
+import { apiFetch } from './api'
 import { useCloseOnOutsideClick } from './dropdown'
 import { formatTime } from './format'
 import Logo from './Logo'
@@ -225,7 +226,7 @@ function SongRow({
     setSavingRename(true)
     setRenameError(null)
     try {
-      const res = await fetch(`${API_BASE}/library/${song.md5}/rename`, {
+      const res = await apiFetch(`${API_BASE}/library/${song.md5}/rename`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: next }),
@@ -247,7 +248,7 @@ function SongRow({
     setConfirmDeleteOpen(false)
     setDeleteError(null)
     try {
-      const res = await fetch(`${API_BASE}/library/${song.md5}`, { method: 'DELETE' })
+      const res = await apiFetch(`${API_BASE}/library/${song.md5}`, { method: 'DELETE' })
       if (!res.ok) {
         const detail = await res.json().catch(() => null)
         throw new Error(detail?.detail ?? `DELETE track -> HTTP ${res.status}`)
@@ -350,7 +351,7 @@ export default function Library({
 
   const refresh = useCallback(() => {
     setLoading(true)
-    return fetch(`${API_BASE}/library`)
+    return apiFetch(`${API_BASE}/library`)
       .then((res) => {
         if (!res.ok) throw new Error(`GET library -> HTTP ${res.status}`)
         return res.json() as Promise<{ songs: LibrarySong[] }>
@@ -378,7 +379,7 @@ export default function Library({
     try {
       const body = new FormData()
       body.append('file', file)
-      const res = await fetch(`${API_BASE}/import`, { method: 'POST', body })
+      const res = await apiFetch(`${API_BASE}/import`, { method: 'POST', body })
       if (!res.ok) {
         const detail = await res.json().catch(() => null)
         throw new Error(detail?.detail ?? `POST import -> HTTP ${res.status}`)

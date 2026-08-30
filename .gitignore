@@ -14,3 +14,23 @@ tracks/
 # Tapped grids: user data, local-only. Unlike cache/, deleting this loses work
 # that cannot be regenerated from the audio.
 data/grids/
+
+# Library manifests: per-account data now that the app is multi-tenant (used
+# to be a handful of files for one person; now potentially every account's
+# song titles/filenames). Was never gitignored before this project went
+# multi-user — that was an oversight relative to data/grids/ above, not a
+# deliberate choice, and the migration to data/library/<user_id>/ makes it
+# one worth fixing now rather than carrying forward.
+data/library/
+
+# Accounts database (bcrypt hashes, emails) and its WAL-mode sidecar files —
+# never committed, same as any other real user data above.
+data/users.db
+data/users.db-wal
+data/users.db-shm
+
+# Secrets and local overrides. .env.example (committed) documents the shape;
+# .env itself is per-deploy and holds SESSION_SECRET among other things.
+.env
+.env.*
+!.env.example

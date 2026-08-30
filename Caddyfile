@@ -1,0 +1,30 @@
+# {$DOMAIN} reads the DOMAIN env var (see docker-compose.yml / .env). Caddy
+# automatically requests and renews a real Let's Encrypt certificate for a
+# public domain. For the special hostname `localhost` it does NOT attempt
+# ACME (which would fail — Let's Encrypt can't issue for it) and instead
+# mints a certificate from its own internal, locally-trusted CA, still
+# serving HTTPS and still redirecting :80 to :443 — so local verification
+# (DOMAIN=localhost) needs `curl -k`/a browser that trusts Caddy's local CA,
+# not plain HTTP. Same Caddyfile either way, just a different cert source.
+{$DOMAIN} {
+    encode gzip
+
+    # Everything under /api/* goes to the backend. Same-origin with the
+    # frontend below is what lets the session cookie flow on every request
+    # with no CORS/credentials wiring in the frontend at all — see
+    # frontend/src/api.ts's comment.
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # Everything else is the built SPA (plus tos.html, copied into dist/ by
+    # the Vite build since it lives in frontend/public/). try_files falls
+    # back to index.html for anything that isn't a real file — there's no
+    # client-side router today (see App.tsx), but this keeps a hard refresh
+    # safe regardless.
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}

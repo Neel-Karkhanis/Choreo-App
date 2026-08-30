@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiFetch } from './api'
 import { API_BASE } from './snap'
 import type { GridData } from './types'
 
@@ -87,7 +88,7 @@ export function useManualGrid(trackId: string | undefined): ManualGridStore {
     }
     publish({ grid: null, loading: true })
     let stale = false
-    fetch(manualGridUrl(trackId))
+    apiFetch(manualGridUrl(trackId))
       .then((res) => {
         if (!res.ok) throw new Error(`GET manual-grid -> HTTP ${res.status}`)
         return res.json() as Promise<{ manual_grid: ManualGridPayload | null }>
@@ -116,7 +117,7 @@ export function useManualGrid(trackId: string | undefined): ManualGridStore {
       const rollback = live.current
       publish({ grid: next, loading: false })
       setError(null)
-      fetch(manualGridUrl(trackId), {
+      apiFetch(manualGridUrl(trackId), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(toPayload(next)),

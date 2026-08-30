@@ -1,3 +1,4 @@
+import { apiFetch } from './api'
 import { API_BASE } from './snap'
 
 // The Web Audio stem engine: the app's audio source AND clock authority.
@@ -141,7 +142,7 @@ export async function loadStems(trackId: string, signal?: AbortSignal): Promise<
   const entries = await Promise.all(
     STEM_NAMES.map(async (name) => {
       const url = trackUrl(trackId, name)
-      const res = await fetch(url, { signal })
+      const res = await apiFetch(url, { signal })
       if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
       const buffer = await decodeToTarget(await res.arrayBuffer(), TARGET_FORMATS[name])
       return [name, buffer] as const

@@ -1,5 +1,6 @@
 antlr4-python3-runtime==4.9.3
 audioread==3.1.0
+bcrypt==5.0.0
 beat_this @ git+https://github.com/CPJKU/beat_this.git
 certifi==2026.2.25
 cffi==2.0.0
@@ -17,6 +18,7 @@ fsspec==2026.3.0
 idna==3.11
 ImageIO==2.37.3
 imageio-ffmpeg==0.6.0
+itsdangerous==2.2.0
 Jinja2==3.1.6
 joblib==1.5.3
 julius==0.2.7
@@ -46,9 +48,11 @@ pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 PyYAML==6.0.3
+redis==8.1.0
 requests==2.32.5
 retrying==1.4.2
 rotary-embedding-torch==0.8.9
+rq==2.11.0
 scikit-learn==1.8.0
 scipy==1.17.1
 setuptools==81.0.0
