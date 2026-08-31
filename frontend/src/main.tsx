@@ -9,9 +9,8 @@ import { applyStoredAccent } from './accentColor'
 
 registerServiceWorker()
 
-// Arms one-shot gesture listeners that create + unlock the shared AudioContext
-// and start the muted <audio> ringer-switch hint. Must run before any tap
-// reaches the app — see audioUnlock.ts.
+// Arms one-shot gesture listeners that create + unlock the shared AudioContext.
+// Must run before any tap reaches the app — see audioUnlock.ts.
 installAudioUnlock()
 
 // Runs before the first React commit so a stored dark-mode preference is on

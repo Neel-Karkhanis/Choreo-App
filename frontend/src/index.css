@@ -372,6 +372,36 @@ li {
   padding: 0 4px;
 }
 
+/* iOS-only "check Silent Mode" hint shown once ever, while playback is
+   demonstrably running (Song.tsx's SilentModeNotice). Same plain treatment
+   as .install-prompt — no design mock covers it. */
+.silent-mode-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 8px;
+  background: var(--color-chip-bg);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.silent-mode-notice span {
+  flex: 1;
+}
+
+.silent-mode-notice-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-muted-text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
 /* The overall timeline: a plain whole-song position bar with draggable A/B
    loop handles — not a waveform view. Padded so the round handles don't clip
    at the track's own left/right edges when A is at 0 or B is at duration.
@@ -1150,46 +1180,58 @@ li {
    work: single fixed layout, no breakpoints.
    --------------------------------------------------------------------------- */
 
-/* The scroll container: everything but the fixed bottom pill nav lives here.
-   Its bottom padding is measured off the nav's own rendered height (see
-   Song.tsx) so the nav never overlaps the end of the content. */
+/* Everything below the header lives here — the timeline card, its errors, the
+   Library/[song name] nav. A sibling of .song-head, not its parent (see
+   Song.tsx), so .song--centered can center this block on its own.
+   padding-bottom is breathing room below the nav (the last thing in normal
+   flow now that it isn't fixed to the viewport). */
 .song-scroll {
   width: 100%;
-  margin-top: 25px;
-  /* Breathing room below the Library/[song name] pill, now the last thing in
-     this container's normal flow (it used to be fixed to the viewport, so
-     nothing here needed to reserve space for it). */
   padding-bottom: 24px;
   box-sizing: border-box;
 }
 
 /* Once the timeline is actually mounted (Song.tsx adds this modifier only
-   when `engine` is truthy — not during the loading screens, whose only
-   in-flow content is the header), fill the viewport and let .song-scroll's
-   auto margins center it — at the user's explicit request, the timeline +
-   controls + nav sit in the vertical middle of the screen rather than
-   pinned to the top with dead space below. When the content is taller than
-   the viewport (tap overlay open, stacked error lines, video screen) the
-   auto margins collapse to 0 and it scrolls normally from the top. */
+   when `engine` is truthy — not during the loading screens), fill the
+   viewport so the content can be vertically centered rather than pinned to
+   the top with dead space below — at the user's explicit request. Uses
+   collapsible auto margins (not justify-content:center) so content taller
+   than the viewport still scrolls normally from the top instead of having
+   its top clipped. */
 .song--centered {
   display: flex;
   flex-direction: column;
   min-height: calc(100dvh - 4rem);
 }
 
+/* Wide layout: header + timeline block centered together as one group — the
+   auto above the header and the auto below the scroll split the free space
+   evenly. */
+.song--centered .song-head {
+  margin-top: auto;
+}
 .song--centered .song-scroll {
-  margin: auto 0;
+  margin-bottom: auto;
 }
 
-/* Mobile portrait only: tighten the two horizontal gutters around the
-   Timeline card to 40% of their desktop size (a 60% reduction), at the
-   user's explicit request. Desktop / wider layout is untouched.
-     - card-to-screen-edge: body's own 32px side margin, of which .song
-       claws back 19.2px via negative margin -> 12.8px net gutter.
-     - waveform-to-card-edge: the card's 22px padding -> 8.8px, with the
-       full-bleed divider's negative margin following it down to -8.8px so
-       it stays flush. */
+/* Mobile portrait tweaks, all at the user's explicit request:
+     1. Header (logo / title / back arrow) pinned to the top of the screen,
+        with ONLY the timeline block centered in the space left below it
+        (desktop centers the two together as a group — see above).
+     2. Tighten the two horizontal gutters around the Timeline card to 40%
+        of their desktop size (a 60% reduction):
+          - card-to-screen-edge: body's own 32px side margin, of which .song
+            claws back 19.2px via negative margin -> 12.8px net gutter.
+          - waveform-to-card-edge: the card's 22px padding -> 8.8px, with the
+            full-bleed divider's negative margin following it down to -8.8px
+            so it stays flush. */
 @media (max-width: 480px) {
+  .song--centered .song-head {
+    margin-top: 25px;
+  }
+  .song--centered .song-scroll {
+    margin-top: auto;
+  }
   .song {
     margin-left: -19.2px;
     margin-right: -19.2px;
@@ -1283,7 +1325,14 @@ li {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  /* Top gap that used to live on .song-scroll's margin-top, back when the
+     header was the first thing inside it. .song--centered overrides this to
+     `auto` on wide screens (centering the header with the rest as a group);
+     the mobile media query puts it back to 25px so the header stays pinned
+     up top. */
+  margin-top: 25px;
   margin-bottom: 12px;
+  flex: none;
 }
 
 .song-head-left {
