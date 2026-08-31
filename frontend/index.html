@@ -3,8 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Choreo</title>
+
+    <!-- PWA install: the manifest + icons are what makes "Add to Home
+         Screen" register as an app install rather than a bare bookmark.
+         Installed home-screen apps are exempt from Safari's 7-day
+         script-writable-storage eviction (see device.ts, localDb.ts) — the
+         whole reason this exists is durability, not polish. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#7e14ff" />
+
+    <!-- iOS ignores the web manifest for most of this — Safari needs its
+         own apple-* meta tags and a non-transparent apple-touch-icon (see
+         InstallPrompt.tsx for the manual Share > Add to Home Screen nudge,
+         since iOS has no install-prompt API to hook). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Choreo" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <div id="root"></div>

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@wavesurfer/react": "^1.0.12",
+    "idb": "^8.0.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "wavesurfer.js": "^7.12.10"

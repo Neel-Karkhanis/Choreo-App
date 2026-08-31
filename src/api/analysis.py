@@ -9,13 +9,15 @@ Every function here takes fully-resolved paths, never a bare track id or a
 module-level TRACKS_DIR/CACHE_DIR constant: the worker that calls analyze()
 is a separate Python process from the API (docker-compose's `worker`
 service), started independently, and has no reason to share the API
-process's path constants or its notion of "the current user."
+process's path constants or its notion of the current device.
 """
 
 from pathlib import Path
 
 import librosa
 import numpy as np
+
+import identity
 
 # Bump when the analysis JSON shape changes; cached analysis.json files with
 # a different version are discarded and recomputed (stems stay cached).
@@ -72,17 +74,17 @@ def relocate_stems(audio_file_hash, stems, md5, cache_root):
     produced_dir.rmdir()
 
 
-def analyze(user_id, md5, audio_file, cache_root):
+def analyze(owner_id, md5, audio_file, cache_root):
     """Run the full analysis pipeline for one track. Slow on a cache miss
     (Demucs + beat_this on CPU) — this is the job body a worker executes
     (see jobs.run_analysis_job); the caller persists the result to
-    analysis.json so this runs at most once per (user, file hash).
+    analysis.json so this runs at most once per (device, file hash).
 
     `audio_file` is a librosa-loadable path, already resolved by the caller
     (server.py's _resolve_analysis_audio). `md5` is the TRACK's identity
     (see relocate_stems) — not necessarily the hash of `audio_file` itself,
     which for a video track is an extracted, regenerable copy of its audio.
-    `cache_root` is this user's own cache/stems/<user_id>/ directory,
+    `cache_root` is this device's own cache/stems/<owner_id>/ directory,
     passed explicitly since the worker process has no shared global for it.
 
     In the returned dict, `downbeats` and `eight_counts` are integer indices
@@ -107,12 +109,16 @@ def analyze(user_id, md5, audio_file, cache_root):
     audio_file = Path(audio_file)
     cache_root = Path(cache_root)
 
-    # progress_key=f"{user_id}:{md5}": audio_file is the extracted wav for a
-    # video track, not the source itself, so it hashes to something other
-    # than md5 (see relocate_stems). Tracking progress under this explicit
-    # key is what lets the API's /analysis/progress poll — which only ever
-    # knows the track's (user_id, md5) — find this run.
-    progress_key = f"{user_id}:{md5}"
+    # progress_key hashes owner_id through identity.owner_key rather than
+    # embedding it verbatim — this key ends up in progress_store (Redis)
+    # and, via _ProgressTrackingTqdm, in whatever logging wraps this call;
+    # owner_id itself must never appear in either (see identity.owner_key's
+    # own docstring). audio_file is the extracted wav for a video track,
+    # not the source itself, so it hashes to something other than md5 (see
+    # relocate_stems) — tracking progress under this explicit key is what
+    # lets the API's /analysis/progress poll, which only ever knows the
+    # track's (owner_id, md5), find this run.
+    progress_key = f"{identity.owner_key(owner_id)}:{md5}"
     stems = source_separation.separate(str(audio_file), progress_key=progress_key, cache_root=cache_root)
     source_separation.get_instrumental(stems)
 

@@ -2,8 +2,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { registerServiceWorker } from './registerServiceWorker'
 import { applyStoredTheme } from './theme'
 import { applyStoredAccent } from './accentColor'
+
+registerServiceWorker()
 
 // Runs before the first React commit so a stored dark-mode preference is on
 // the root element before anything paints — doing this only inside

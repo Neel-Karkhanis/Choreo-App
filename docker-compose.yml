@@ -17,16 +17,34 @@ services:
   # Same image as backend, different command — see the Dockerfile's own
   # comment for why they're one image rather than two. Runs the slow
   # Demucs/beat_this pipeline (src/api/jobs.py's run_analysis_job) off the
-  # request path; a single worker processes one job at a time by default,
-  # which is the intentional v1 default for a cheap CPU-only box (see the
-  # plan doc), not a placeholder for "fix later" — scaling later is just
-  # adding more `worker` replicas against the same queue.
+  # request path. `replicas` is the actual concurrency cap (Phase 5) —
+  # each RQ worker process pulls and runs exactly one job at a time, so N
+  # replicas against the shared `analysis` queue means at most N jobs run
+  # at once; anything beyond that just waits in the queue, which
+  # server.py's own polling loop (get_analysis) already handles. Measured
+  # at ~1.4GB peak RSS per job on a real ~4-minute track (Demucs +
+  # beat_this + onsets, one worker process) — see .env.example's own
+  # comment on CHOREO_MAX_CONCURRENT_JOBS for the sizing math this default
+  # is based on.
+  #
+  # OMP_NUM_THREADS/MKL_NUM_THREADS=2 is what makes that cap actually
+  # behave under load: torch defaults to using every visible core for its
+  # own intra-op parallelism, so without this, 2 concurrent jobs on a
+  # 4-vCPU box would both try to claim all 4 cores and spend more time
+  # contending with each other than doing anything — 2 workers x 2 threads
+  # each is a deliberate, even split of a 4-vCPU box, not an arbitrary
+  # number; retune both together if CHOREO_MAX_CONCURRENT_JOBS or the
+  # host's vCPU count ever changes.
   worker:
     build: .
     command: ["rq", "worker", "analysis", "-u", "redis://redis:6379/0"]
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+    deploy:
+      replicas: ${CHOREO_MAX_CONCURRENT_JOBS:-2}
     volumes:
       - tracks_data:/app/tracks
       - cache_data:/app/cache
@@ -70,3 +88,23 @@ volumes:
   app_data:
   caddy_data:
   caddy_config:
+
+# Every service above attaches to this implicitly (Compose's own default
+# network) — pinned to a fixed subnet rather than left to Docker's
+# auto-assigned one specifically so the Dockerfile's uvicorn CMD can trust
+# X-Forwarded-For from an exact CIDR instead of --forwarded-allow-ips='*'.
+# See that CMD's own comment: trusting '*' is only safe as long as
+# `backend` is never given a `ports:` mapping (it currently only `expose`s
+# 8000 — see that service above), and that invariant lives in THIS file
+# while the thing trusting it lives in the Dockerfile. Pinning the subnet
+# here means even an accidental future `ports:` on `backend` would have an
+# external caller's direct-connection address fall outside this range —
+# their spoofed X-Forwarded-For would be ignored, not trusted, and
+# request.client.host would correctly fall back to their real (external)
+# address instead. Change this value and the Dockerfile's
+# --forwarded-allow-ips together; they must always match.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

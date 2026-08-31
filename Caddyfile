@@ -1,27 +1,42 @@
+# The device-id cookie Caddy proxies through to the backend is host-only
+# (no Domain attribute — see identity.py/server.py), which is deliberate:
+# a Domain=.{$DOMAIN} cookie would be sent to EVERY subdomain, widening
+# its exposure for no benefit this app needs. The tradeoff is that a
+# host-only cookie is only ever visible to the exact host that set it — a
+# visitor hitting www.{$DOMAIN} would get cookied there and see none of
+# the data their apex-hosted device already has, silently splitting them
+# into two devices. This block is what keeps that from ever happening:
+# it's the only site address covering www, and it does nothing but
+# redirect to the apex, permanently, before Caddy would otherwise have to
+# treat www as a second, independent origin.
+www.{$DOMAIN} {
+    redir https://{$DOMAIN}{uri} permanent
+}
+
 # {$DOMAIN} reads the DOMAIN env var (see docker-compose.yml / .env). Caddy
 # automatically requests and renews a real Let's Encrypt certificate for a
-# public domain. For the special hostname `localhost` it does NOT attempt
-# ACME (which would fail — Let's Encrypt can't issue for it) and instead
-# mints a certificate from its own internal, locally-trusted CA, still
-# serving HTTPS and still redirecting :80 to :443 — so local verification
-# (DOMAIN=localhost) needs `curl -k`/a browser that trusts Caddy's local CA,
-# not plain HTTP. Same Caddyfile either way, just a different cert source.
+# public domain (both this block's {$DOMAIN} and the www redirect block's
+# www.{$DOMAIN} above get their own cert). For the special hostname
+# `localhost` it does NOT attempt ACME (which would fail — Let's Encrypt
+# can't issue for it) and instead mints a certificate from its own
+# internal, locally-trusted CA, still serving HTTPS and still redirecting
+# :80 to :443 — so local verification (DOMAIN=localhost) needs `curl -k`/a
+# browser that trusts Caddy's local CA, not plain HTTP. Same Caddyfile
+# either way, just a different cert source.
 {$DOMAIN} {
     encode gzip
 
     # Everything under /api/* goes to the backend. Same-origin with the
-    # frontend below is what lets the session cookie flow on every request
+    # frontend below is what lets the device-id cookie flow on every request
     # with no CORS/credentials wiring in the frontend at all — see
     # frontend/src/api.ts's comment.
     handle /api/* {
         reverse_proxy backend:8000
     }
 
-    # Everything else is the built SPA (plus tos.html, copied into dist/ by
-    # the Vite build since it lives in frontend/public/). try_files falls
-    # back to index.html for anything that isn't a real file — there's no
-    # client-side router today (see App.tsx), but this keeps a hard refresh
-    # safe regardless.
+    # Everything else is the built SPA. try_files falls back to index.html
+    # for anything that isn't a real file — there's no client-side router
+    # today (see App.tsx), but this keeps a hard refresh safe regardless.
     handle {
         root * /srv/frontend
         try_files {path} /index.html

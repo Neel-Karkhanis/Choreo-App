@@ -342,6 +342,36 @@ li {
   color: crimson;
 }
 
+/* No design mock covers this (see InstallPrompt.tsx's own comment) — kept
+   deliberately plain, matching the rest of the app's
+   placeholder-styling-pending-a-design-pass look. */
+.install-prompt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 8px;
+  background: var(--color-chip-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.install-prompt span {
+  flex: 1;
+}
+
+.install-prompt-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-muted-text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
 /* The overall timeline: a plain whole-song position bar with draggable A/B
    loop handles — not a waveform view. Padded so the round handles don't clip
    at the track's own left/right edges when A is at 0 or B is at duration.

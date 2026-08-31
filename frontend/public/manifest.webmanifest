@@ -1,0 +1,14 @@
+{
+  "name": "Choreo",
+  "short_name": "Choreo",
+  "description": "Learn choreography from a song or a dance video: tap out the beat grid, isolate a stem, loop a phrase.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#7e14ff",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

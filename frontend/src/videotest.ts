@@ -129,7 +129,10 @@ async function main() {
     return
   }
   statusEl.textContent = `loading stems for ${trackId}…`
-  const buffers = await loadStems(trackId)
+  // No md5 available from this debug harness's ?track=/?video= query params
+  // — undefined just means "skip the IndexedDB cache", same as before this
+  // file's stemEngine.ts grew one.
+  const buffers = await loadStems(trackId, undefined)
   const engine = new StemEngine(buffers)
   statusEl.textContent = 'stems loaded; loading video…'
 

@@ -21,6 +21,7 @@ import redis
 from rq import Queue
 
 import analysis
+import identity
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
@@ -31,18 +32,23 @@ _LOCK_TTL_SECONDS = 60 * 60  # generous ceiling; a stuck claim self-clears here
 _ACTIVE_STATUSES = ("queued", "started", "deferred", "scheduled")
 
 
-def _job_id(user_id, md5):
+def _job_id(owner_id, md5):
+    # Hashed through identity.owner_key rather than embedding owner_id
+    # verbatim: this becomes the RQ job id, and RQ's default worker logging
+    # prints job ids on every start/finish — owner_id itself must never
+    # appear there (see identity.owner_key's own docstring).
+    #
     # RQ validates job ids against [A-Za-z0-9_-]+ (rq.job.validate_job_id) —
     # no colons, unlike the Redis keys elsewhere in this module and in
     # progress_store.py, where ':' is the normal, allowed separator.
-    return f"{user_id}-{md5}"
+    return f"{identity.owner_key(owner_id)}-{md5}"
 
 
-def _lock_key(user_id, md5):
-    return f"lock:analyze:{user_id}:{md5}"
+def _lock_key(owner_id, md5):
+    return f"lock:analyze:{identity.owner_key(owner_id)}:{md5}"
 
 
-def run_analysis_job(user_id, md5, audio_file, cache_root):
+def run_analysis_job(owner_id, md5, audio_file, cache_root):
     """The job body a worker executes.
 
     Runs the real pipeline (analysis.analyze), writes its result to
@@ -55,17 +61,17 @@ def run_analysis_job(user_id, md5, audio_file, cache_root):
     from pathlib import Path
 
     try:
-        result = analysis.analyze(user_id, md5, audio_file, cache_root)
+        result = analysis.analyze(owner_id, md5, audio_file, cache_root)
         cache_dir = Path(cache_root) / md5
         cache_dir.mkdir(parents=True, exist_ok=True)
         (cache_dir / "analysis.json").write_text(json.dumps(result))
         return result
     finally:
-        redis_conn.delete(_lock_key(user_id, md5))
+        redis_conn.delete(_lock_key(owner_id, md5))
 
 
-def enqueue_or_attach(user_id, md5, audio_file, cache_root):
-    """Start analysis for (user_id, md5) unless it is already running.
+def enqueue_or_attach(owner_id, md5, audio_file, cache_root):
+    """Start analysis for (owner_id, md5) unless it is already running.
 
     Atomically claims a per-track lock with SET NX before enqueuing, so two
     concurrent requests for the same uncached track only ever start one
@@ -73,12 +79,12 @@ def enqueue_or_attach(user_id, md5, audio_file, cache_root):
     the job the winner started, rather than double-enqueuing. Returns the
     Job either way.
     """
-    job_id = _job_id(user_id, md5)
+    job_id = _job_id(owner_id, md5)
     existing = queue.fetch_job(job_id)
     if existing is not None and existing.get_status(refresh=True) in _ACTIVE_STATUSES:
         return existing
 
-    claimed = redis_conn.set(_lock_key(user_id, md5), "1", nx=True, ex=_LOCK_TTL_SECONDS)
+    claimed = redis_conn.set(_lock_key(owner_id, md5), "1", nx=True, ex=_LOCK_TTL_SECONDS)
     if not claimed:
         # Someone else won the race between our fetch_job above and here —
         # their enqueue should already be visible; attach to it.
@@ -92,7 +98,7 @@ def enqueue_or_attach(user_id, md5, audio_file, cache_root):
 
     return queue.enqueue(
         run_analysis_job,
-        user_id,
+        owner_id,
         md5,
         str(audio_file),
         str(cache_root),
@@ -103,5 +109,5 @@ def enqueue_or_attach(user_id, md5, audio_file, cache_root):
     )
 
 
-def get_job(user_id, md5):
-    return queue.fetch_job(_job_id(user_id, md5))
+def get_job(owner_id, md5):
+    return queue.fetch_job(_job_id(owner_id, md5))

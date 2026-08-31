@@ -165,6 +165,11 @@ export default function Song({
   const [error, setError] = useState<string | null>(null)
   const [engine, setEngine] = useState<StemEngine | null>(null)
   const [stemError, setStemError] = useState<string | null>(null)
+  // Non-fatal: a local IndexedDB cache write hit its storage quota (see
+  // stemEngine.ts's onCacheWarning). Playback is unaffected — the buffer
+  // already loaded and decoded fine — this just says the stem won't be
+  // there next time without a re-download.
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   // Demucs' live separation progress for the in-flight analysis fetch below;
   // see the polling effect further down and ProgressRing/LoadingStatus above.
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
@@ -173,7 +178,7 @@ export default function Song({
   // with the analysis (a tiny sidecar read against a slow pipeline), so it is
   // always in hand before stems finish decoding and the timeline first paints;
   // a track with no saved grid opens in the tap state.
-  const manual = useManualGrid(trackId)
+  const manual = useManualGrid(trackId, song.md5)
 
   useEffect(() => {
     if (!trackId) return
@@ -239,7 +244,10 @@ export default function Song({
     const controller = new AbortController()
     setEngine(null)
     setStemError(null)
-    loadStems(analysis.id, controller.signal)
+    setCacheWarning(null)
+    loadStems(analysis.id, song.md5, controller.signal, (message) => {
+      if (!stale) setCacheWarning(message)
+    })
       .then((buffers) => {
         if (stale) return
         const next = new StemEngine(buffers)
@@ -256,6 +264,10 @@ export default function Song({
       stale = true
       controller.abort()
     }
+    // song.md5 deliberately excluded — App.tsx keys Song by song.md5, so a
+    // change to it always remounts this component from scratch rather than
+    // re-running this effect; within one mount it's invariant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis])
 
   // The engine owns an AudioContext; close it when the engine is replaced or
@@ -292,6 +304,7 @@ export default function Song({
         {error && <p className="error">{error}</p>}
         {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
         {stemError && <p className="error">Stems unavailable: {stemError}</p>}
+        {cacheWarning && <p className="settings-section-note">{cacheWarning}</p>}
         {manual.error && <p className="error">Tapped grid: {manual.error}</p>}
         {loading && <LoadingStatus progress={progress} />}
         {analysis && !engine && !stemError && <LoadingStatus showSubtext={false} />}
