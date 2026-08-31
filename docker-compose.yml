@@ -1,5 +1,15 @@
+# IMAGE_TAG picks which build `image:` below resolves to (a short git SHA
+# for a real deploy — see README's Service Worker Kill Switch section's
+# neighbor, the deploy notes, for the full procedure). `build:` stays
+# alongside `image:` on every custom service purely for local dev
+# convenience (`docker compose up --build` still works with no IMAGE_TAG
+# set — it defaults to `local`, a tag that's never pushed anywhere) —
+# prod's own .env pins a real IMAGE_TAG and is run with `docker compose
+# pull && docker compose up -d`, never `--build`, so it only ever runs
+# what was actually pushed to ghcr.io/neel-karkhanis and never `:latest`.
 services:
   backend:
+    image: ghcr.io/neel-karkhanis/choreo-app-backend:${IMAGE_TAG:-local}
     build: .
     env_file: .env
     environment:
@@ -36,6 +46,7 @@ services:
   # number; retune both together if CHOREO_MAX_CONCURRENT_JOBS or the
   # host's vCPU count ever changes.
   worker:
+    image: ghcr.io/neel-karkhanis/choreo-app-backend:${IMAGE_TAG:-local}
     build: .
     command: ["rq", "worker", "analysis", "-u", "redis://redis:6379/0"]
     env_file: .env
@@ -65,6 +76,7 @@ services:
   # Reverse proxy + TLS + static frontend, all one process. See the
   # Caddyfile for the actual routing.
   caddy:
+    image: ghcr.io/neel-karkhanis/choreo-app-caddy:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile.frontend
