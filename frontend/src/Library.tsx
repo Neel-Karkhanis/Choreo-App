@@ -3,7 +3,9 @@ import ConfirmDialog from './ConfirmDialog'
 import { apiFetch } from './api'
 import { useCloseOnOutsideClick } from './dropdown'
 import { formatTime } from './format'
+import InstallPrompt from './InstallPrompt'
 import Logo from './Logo'
+import { buildProjectExport, downloadProjectFile } from './projectFile'
 import { API_BASE } from './snap'
 import type { LibrarySong } from './types'
 
@@ -107,10 +109,12 @@ function SongRowMenu({
   song,
   onRename,
   onDelete,
+  onExport,
 }: {
   song: LibrarySong
   onRename: () => void
   onDelete: () => void
+  onExport: () => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -150,6 +154,16 @@ function SongRowMenu({
             }}
           >
             Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              onExport()
+            }}
+          >
+            Export project
           </button>
           <button
             type="button"
@@ -202,6 +216,7 @@ function SongRow({
   const [savingRename, setSavingRename] = useState(false)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const startRename = () => {
     setRenameValue(displayName)
@@ -256,6 +271,20 @@ function SongRow({
       onChanged()
     } catch (err) {
       setDeleteError(String(err))
+    }
+  }
+
+  // Non-destructive, so no confirmation — unlike delete/import. Reads the
+  // grid directly by md5 (works even on a stems_evicted row with no source
+  // file: see server.py's get_manual_grid_by_md5) and hands the browser a
+  // file to save; see projectFile.ts for exactly what is and isn't in it
+  // (no audio, no owner_id).
+  const submitExport = async () => {
+    setExportError(null)
+    try {
+      downloadProjectFile(await buildProjectExport(song))
+    } catch (err) {
+      setExportError(String(err))
     }
   }
 
@@ -322,8 +351,14 @@ function SongRow({
           {meta}
         </button>
       )}
-      <SongRowMenu song={song} onRename={startRename} onDelete={() => setConfirmDeleteOpen(true)} />
+      <SongRowMenu
+        song={song}
+        onRename={startRename}
+        onDelete={() => setConfirmDeleteOpen(true)}
+        onExport={() => void submitExport()}
+      />
       {deleteError && <p className="error">{deleteError}</p>}
+      {exportError && <p className="error">{exportError}</p>}
       <ConfirmDialog
         open={confirmDeleteOpen}
         title="Delete track"
@@ -415,10 +450,12 @@ export default function Library({
         </div>
       </header>
 
+      <InstallPrompt />
+
       {error && <p className="error">{error}</p>}
       {loading && songs.length === 0 && <p>Loading library…</p>}
       {!loading && songs.length === 0 && !error && (
-        <p>No songs yet. Import one to get started.</p>
+        <p className="library-empty">No songs yet. Import one to get started.</p>
       )}
 
       <ul className="song-list">

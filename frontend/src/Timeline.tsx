@@ -143,7 +143,8 @@ const SLICE_EIGHT_COUNTS = 2
 // The audio waveform's OWN drawn height, in px. Briefly shrunk 33% (to 64) at
 // the user's explicit request, then reverted back to 96, then grown 33% from
 // THAT (96 * 1.33 = 127.68, rounded to 128), then grown a further 25% from
-// THAT (128 * 1.25 = 160) — this is "the overall timeline" getting bigger
+// THAT (128 * 1.25 = 160), then grown a further 25% again from THAT
+// (160 * 1.25 = 200) — this is "the overall timeline" getting bigger
 // (specifically taller, per that latest request — a separate attempt at
 // growing it WIDER via the card's own CSS width was tried and reverted; this
 // constant is the one that actually means "the timeline" every time it's
@@ -156,7 +157,7 @@ const SLICE_EIGHT_COUNTS = 2
 // below still positions itself relative to this figure (via waveformPct
 // below where it matters), so they all rescale automatically with no other
 // change whenever this is retuned.
-const WAVEFORM_HEIGHT = 160
+const WAVEFORM_HEIGHT = 200
 
 // A band ABOVE the waveform, reserved for the 1..8/"&" count labels — at the
 // user's explicit request, reversed from an earlier below-the-waveform

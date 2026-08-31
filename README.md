@@ -108,3 +108,25 @@ npm run build   # type-checks, then builds
 npm run lint    # oxlint
 npm test        # vitest
 ```
+
+## Service Worker Kill Switch
+
+`frontend/public/sw.js` is the app's real service worker (installability +
+a network-first navigation strategy — see its own header for exactly what
+it does and doesn't cache). `frontend/public/sw-unregister.js` sits next to
+it, unused by default, for the one failure mode a normal deploy can't fix:
+a service worker sitting in front of every request means a bad one can
+block the very update that would replace it.
+
+If `sw.js` ever gets a client stuck, deploy the fix by **overwriting
+`sw.js`'s content with `sw-unregister.js`'s content, at the same
+`/sw.js` URL** (not by adding a new file or changing the registration
+path) — the browser's update check is a byte diff against the currently
+installed script at that exact URL, done through the old worker's own
+fetch handler, so the URL has to stay `/sw.js` for the new bytes to ever
+be seen at all. The kill-switch script unregisters itself and deletes
+every cache this app created on activate, then reloads any open tabs —
+one visit and a client is back to plain, uncached requests. Once
+confirmed clean, redeploy the real `sw.js` to restore installability;
+`sw-unregister.js` stays in the repo between incidents, it does not need
+to be deleted or re-added.

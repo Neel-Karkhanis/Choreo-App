@@ -342,6 +342,36 @@ li {
   color: crimson;
 }
 
+/* No design mock covers this (see InstallPrompt.tsx's own comment) — kept
+   deliberately plain, matching the rest of the app's
+   placeholder-styling-pending-a-design-pass look. */
+.install-prompt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 8px;
+  background: var(--color-chip-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.install-prompt span {
+  flex: 1;
+}
+
+.install-prompt-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-muted-text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
 /* The overall timeline: a plain whole-song position bar with draggable A/B
    loop handles — not a waveform view. Padded so the round handles don't clip
    at the track's own left/right edges when A is at 0 or B is at duration.
@@ -630,6 +660,12 @@ li {
   align-items: center;
   justify-content: center;
   flex: none;
+  /* Fixed footprint so the button is the SAME width whether it shows the
+     dial icon (15px) or a rate readout ("1.75×", ~30px) — otherwise
+     changing the speed grew this button and shoved Hear (and, a row down,
+     Onsets) onto a new line. Wide enough for the longest readout. */
+  min-width: 2.5rem;
+  box-sizing: border-box;
 }
 
 /* Shared by every remaining button-triggered menu (Speed, and the loop
@@ -640,13 +676,12 @@ li {
 }
 
 /* The speed dial's own wrapper (SpeedControl, only ever rendered in
-   Timeline.tsx's top controls row) — shifted right 20px from its normal
-   flex position, at the user's explicit request. Margin lands on THIS
-   wrapper rather than .speed-dial-button itself so .dropdown-list-speed's
-   own `left:0` (relative to this same wrapper) still opens directly under
-   the button instead of drifting out from under it. A modifier class of
-   its own, not a change to bare .dropdown, since that class is shared with
-   unrelated dropdowns elsewhere (e.g. Library's row menu). */
+   Timeline.tsx's top controls row) — shifted right 7px from its normal flex
+   position, at the user's explicit request. Margin lands on THIS wrapper
+   rather than .speed-dial-button itself so .dropdown-list-speed, positioned
+   relative to this same wrapper, stays centered on the button. A modifier
+   class of its own, not a change to bare .dropdown, since that class is
+   shared with unrelated dropdowns elsewhere (e.g. Library's row menu). */
 .speed-dial-dropdown {
   margin-left: 7px;
 }
@@ -668,9 +703,14 @@ li {
 }
 
 /* Speed's dropdown carries a wider slider plus its own quarter-x dial labels,
-   so it gets a little more room and a labeled tick row underneath. */
+   so it gets a little more room and a labeled tick row underneath. Centered
+   on the dial button (like .loop-snap-menu) rather than left-anchored: at
+   220px wide, opening it from the button's left edge ran it off the right
+   side of a phone screen — centered, it stays within the card. */
 .dropdown-list-speed {
   width: 220px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 /* The snap-mode menu opened by TAPPING (not dragging) a loop A/B handle — see
@@ -892,19 +932,11 @@ li {
   cursor: default;
 }
 
-/* Icon-only past this width — the label is what gives first under pressure,
-   not the icon (aria-label on the button itself keeps the accessible name
-   regardless of which one is visually shown). A deliberate one-off exception
-   to the rest of the app's fixed single-width layout (see this file's "Still
-   no responsive layout work" note above). */
-@media (max-width: 480px) {
-  .redo-counts-label {
-    display: none;
-  }
-  .redo-counts-button {
-    padding: 4px;
-  }
-}
+/* The label ("Redo counts" / "Exit tap mode") stays visible at every width,
+   including mobile portrait — at the user's explicit request, reversed from
+   an earlier icon-only-past-480px treatment. .timeline-controls-row wraps
+   (flex-wrap) if the row runs out of room rather than the label being
+   dropped. */
 
 /* Tap-counting panel (design/handoff/README.md "Tap-counting panel"): a
    MULTI-TAP capture flow, not a single-tap re-phase — tapSession.ts collects
@@ -1129,6 +1161,47 @@ li {
      nothing here needed to reserve space for it). */
   padding-bottom: 24px;
   box-sizing: border-box;
+}
+
+/* Once the timeline is actually mounted (Song.tsx adds this modifier only
+   when `engine` is truthy — not during the loading screens, whose only
+   in-flow content is the header), fill the viewport and let .song-scroll's
+   auto margins center it — at the user's explicit request, the timeline +
+   controls + nav sit in the vertical middle of the screen rather than
+   pinned to the top with dead space below. When the content is taller than
+   the viewport (tap overlay open, stacked error lines, video screen) the
+   auto margins collapse to 0 and it scrolls normally from the top. */
+.song--centered {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 4rem);
+}
+
+.song--centered .song-scroll {
+  margin: auto 0;
+}
+
+/* Mobile portrait only: tighten the two horizontal gutters around the
+   Timeline card to 40% of their desktop size (a 60% reduction), at the
+   user's explicit request. Desktop / wider layout is untouched.
+     - card-to-screen-edge: body's own 32px side margin, of which .song
+       claws back 19.2px via negative margin -> 12.8px net gutter.
+     - waveform-to-card-edge: the card's 22px padding -> 8.8px, with the
+       full-bleed divider's negative margin following it down to -8.8px so
+       it stays flush. */
+@media (max-width: 480px) {
+  .song {
+    margin-left: -19.2px;
+    margin-right: -19.2px;
+  }
+  .timeline {
+    padding-left: 8.8px;
+    padding-right: 8.8px;
+  }
+  .timeline-card-divider {
+    margin-left: -8.8px;
+    margin-right: -8.8px;
+  }
 }
 
 /* The rotating "Loading timeline… / Separating stems… / Mapping onsets…"
@@ -1411,6 +1484,16 @@ li {
 .song-list {
   display: flex;
   flex-direction: column;
+}
+
+/* Empty-state line reads as the first "row" of the (absent) list: centered,
+   with the same accent-tinted bottom divider the song rows carry. */
+.library-empty {
+  margin: 0;
+  padding: var(--space-row-padding);
+  text-align: center;
+  border-bottom: var(--border-width-row-divider) solid
+    color-mix(in oklab, var(--color-accent) 45%, var(--color-card-border));
 }
 
 .song-list li {

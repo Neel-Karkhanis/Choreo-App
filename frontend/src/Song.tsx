@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './api'
+import { getAudioContext } from './audioUnlock'
 import Logo from './Logo'
 import Timeline from './Timeline'
 import VideoScreen from './VideoScreen'
@@ -13,9 +14,10 @@ import { useTapSession } from './tapSession'
 import type { GridData, LibrarySong, OnsetData } from './types'
 
 // LEVEL 2 of the app: one song, open. Only one exists at a time, and leaving it
-// unmounts this subtree — which is what tears the engine (and its AudioContext)
-// down. There is no engine cache and no "keep it warm" path: a second live
-// engine would be a second AudioContext playing a second copy of the audio.
+// unmounts this subtree — which is what tears the engine down (its nodes
+// detach from the shared, session-lived AudioContext; see audioUnlock.ts).
+// There is no engine cache and no "keep it warm" path: a second live engine
+// would play a second copy of the audio through that same context.
 
 // Parallel arrays: t[i] is an onset timestamp in seconds, strength[i] the
 // onset-envelope value at that onset. strength is plumbed by schema v4 but
@@ -145,7 +147,13 @@ function LoadingStatus({
       <p key={index} className="song-loading-message">
         {LOADING_MESSAGES[index]}
       </p>
-      {showSubtext && <p className="song-loading-subtext">This may take a couple minutes.</p>}
+      {showSubtext && (
+        <p className="song-loading-subtext">
+          This may take a couple minutes.
+          <br />
+          This is a one-time load per song.
+        </p>
+      )}
     </div>
   )
 }
@@ -165,6 +173,11 @@ export default function Song({
   const [error, setError] = useState<string | null>(null)
   const [engine, setEngine] = useState<StemEngine | null>(null)
   const [stemError, setStemError] = useState<string | null>(null)
+  // Non-fatal: a local IndexedDB cache write hit its storage quota (see
+  // stemEngine.ts's onCacheWarning). Playback is unaffected — the buffer
+  // already loaded and decoded fine — this just says the stem won't be
+  // there next time without a re-download.
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   // Demucs' live separation progress for the in-flight analysis fetch below;
   // see the polling effect further down and ProgressRing/LoadingStatus above.
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
@@ -173,7 +186,7 @@ export default function Song({
   // with the analysis (a tiny sidecar read against a slow pipeline), so it is
   // always in hand before stems finish decoding and the timeline first paints;
   // a track with no saved grid opens in the tap state.
-  const manual = useManualGrid(trackId)
+  const manual = useManualGrid(trackId, song.md5)
 
   useEffect(() => {
     if (!trackId) return
@@ -239,12 +252,18 @@ export default function Song({
     const controller = new AbortController()
     setEngine(null)
     setStemError(null)
-    loadStems(analysis.id, controller.signal)
+    setCacheWarning(null)
+    loadStems(analysis.id, song.md5, controller.signal, (message) => {
+      if (!stale) setCacheWarning(message)
+    })
       .then((buffers) => {
         if (stale) return
-        const next = new StemEngine(buffers)
-        // Dev-only debug handle: lets driver scripts assert engine internals.
-        if (import.meta.env.DEV) {
+        const next = new StemEngine(buffers, getAudioContext())
+        // Debug handle: always in dev (driver scripts assert engine
+        // internals), and in a production build only with ?debug=1 on the URL
+        // — otherwise the deployed build is impossible to inspect from a
+        // phone's Web Inspector (e.g. reading `__stemEngine.ctx.state`).
+        if (import.meta.env.DEV || new URLSearchParams(window.location.search).get('debug') === '1') {
           ;(window as unknown as { __stemEngine?: StemEngine }).__stemEngine = next
         }
         setEngine(next)
@@ -256,11 +275,17 @@ export default function Song({
       stale = true
       controller.abort()
     }
+    // song.md5 deliberately excluded — App.tsx keys Song by song.md5, so a
+    // change to it always remounts this component from scratch rather than
+    // re-running this effect; within one mount it's invariant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis])
 
-  // The engine owns an AudioContext; close it when the engine is replaced or
-  // this song is left (separate effect so the loader above never races its own
-  // cleanup). This is the whole teardown story: unmounting Song runs this.
+  // The engine holds a node tree on the shared AudioContext; detach it when
+  // the engine is replaced or this song is left (separate effect so the loader
+  // above never races its own cleanup). The context itself is session-lived
+  // and is not torn down here (see audioUnlock.ts). This is still the whole
+  // teardown story: unmounting Song runs this.
   useEffect(() => {
     if (!engine) return
     return () => engine.destroy()
@@ -278,7 +303,10 @@ export default function Song({
   const title = song.filename ? song.filename.replace(/\.[^./]+$/, '') : (song.id ?? song.md5)
 
   return (
-    <main className="song">
+    // `song--centered` (once the engine is up) vertically centers the whole
+    // timeline block in the viewport — see index.css. Withheld during the
+    // loading screens so the lone header doesn't float to mid-screen.
+    <main className={engine ? 'song song--centered' : 'song'}>
       <div className="song-scroll">
         <header className="song-head">
           <div className="song-head-left">
@@ -292,6 +320,7 @@ export default function Song({
         {error && <p className="error">{error}</p>}
         {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
         {stemError && <p className="error">Stems unavailable: {stemError}</p>}
+        {cacheWarning && <p className="settings-section-note">{cacheWarning}</p>}
         {manual.error && <p className="error">Tapped grid: {manual.error}</p>}
         {loading && <LoadingStatus progress={progress} />}
         {analysis && !engine && !stemError && <LoadingStatus showSubtext={false} />}

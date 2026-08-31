@@ -1,4 +1,5 @@
 import { apiFetch } from './api'
+import * as localDb from './localDb'
 import { API_BASE } from './snap'
 
 // The Web Audio stem engine: the app's audio source AND clock authority.
@@ -131,20 +132,77 @@ async function decodeToTarget(
 const bufferBytes = (buffer: AudioBuffer) =>
   buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT
 
+// Local IndexedDB cache for the four separated stems (never `original` — the
+// source mix isn't Opus, isn't derived, and isn't what this cache is for; see
+// localDb.ts's own header). Evictable by construction: a cache miss just
+// falls through to the network fetch below, which is already how a track
+// whose stems the SERVER evicted gets them back (see server.py's
+// stems_present/re-separation path) — this is the same shape one layer
+// closer to the user, not a new failure mode to handle.
+const CACHEABLE_STEMS: readonly StemName[] = ['vocals', 'drums', 'bass', 'other']
+
+// Exported ONLY for stemEngine.test.ts, so the cache read/write contract can
+// be tested directly against a mocked localDb without also needing a real
+// Web Audio decode (decodeToTarget below needs an actual browser/OfflineAudio
+// Context, which the test environment doesn't have) — not part of the
+// module's public load seam, which is loadStems.
+export async function fetchStemBytes(
+  trackId: string,
+  md5: string | undefined,
+  name: StemName,
+  signal: AbortSignal | undefined,
+  onCacheWarning: ((message: string) => void) | undefined,
+): Promise<ArrayBuffer> {
+  const cacheable = md5 !== undefined && CACHEABLE_STEMS.includes(name)
+
+  if (cacheable) {
+    const cached = await localDb.getStem(md5, name)
+    if (cached) return cached.arrayBuffer()
+  }
+
+  const url = trackUrl(trackId, name)
+  const res = await apiFetch(url, { signal })
+  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
+  const blob = await res.blob()
+
+  if (cacheable) {
+    const result = await localDb.setStem(md5, name, blob)
+    if (!result.ok && result.reason === 'quota') {
+      // Real, user-facing message per stem — never fail silently (this is
+      // NOT thrown: the buffer we already have is still perfectly playable,
+      // it just won't survive to the next load without a re-download).
+      onCacheWarning?.(
+        `Not enough space on this device to keep the ${name} stem cached — ` +
+          `it will be re-downloaded next time you open this track.`,
+      )
+    }
+  }
+
+  return blob.arrayBuffer()
+}
+
 /**
  * THE load seam: everything that needs stem audio goes through here, keyed by
  * trackId only. A future library feature reimplements this function (or its
  * fetches) and nothing else changes. Loads and decodes all five buffers
  * eagerly, in parallel, to their target formats, and logs real decoded byte
  * sizes (mobile memory profiling wants numbers, not estimates).
+ *
+ * `md5` enables the local cache above — it's optional only so a call site
+ * without it yet degrades to "always fetch" rather than crashing; every real
+ * caller has it (LibrarySong always carries md5). `onCacheWarning` is the one
+ * way a quota failure ever reaches the UI; see fetchStemBytes.
  */
-export async function loadStems(trackId: string, signal?: AbortSignal): Promise<StemBuffers> {
+export async function loadStems(
+  trackId: string,
+  md5: string | undefined,
+  signal?: AbortSignal,
+  onCacheWarning?: (message: string) => void,
+): Promise<StemBuffers> {
   const entries = await Promise.all(
     STEM_NAMES.map(async (name) => {
-      const url = trackUrl(trackId, name)
-      const res = await apiFetch(url, { signal })
-      if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
-      const buffer = await decodeToTarget(await res.arrayBuffer(), TARGET_FORMATS[name])
+      const data = await fetchStemBytes(trackId, md5, name, signal, onCacheWarning)
+      const buffer = await decodeToTarget(data, TARGET_FORMATS[name])
       return [name, buffer] as const
     }),
   )
@@ -315,14 +373,20 @@ export class StemEngine {
   private peaksCache = new Map<StemMode, Float32Array[]>()
   private displayCache = new Map<StemMode, AudioBuffer>()
 
-  constructor(buffers: StemBuffers) {
+  constructor(buffers: StemBuffers, ctx: AudioContext) {
     this.buffers = buffers
     // The original mix is the authoritative track length; stems can differ by
     // a few ms of codec padding and simply end when their buffers run out.
     this.duration = buffers.original.duration
     this.minBufferDuration = Math.min(...STEM_NAMES.map((n) => buffers[n].duration))
-    // 44.1k context so the original buffer plays without a resample.
-    this.ctx = new AudioContext({ sampleRate: 44100 })
+    // The context is created once per session, inside the first user gesture,
+    // and shared across every engine (see audioUnlock.ts) — creating it in
+    // this constructor instead left it `suspended` on iOS, since the
+    // constructor runs deep inside loadStems' async chain with no gesture on
+    // the stack. It is a 44.1k context so the original buffer plays without a
+    // resample. This engine attaches its node tree to ctx.destination here and
+    // detaches it in destroy(); it never closes the context.
+    this.ctx = ctx
     // 5 stem gains -> masterGain (volume/mute) -> duckGain (seek ramp) -> out
     this.duckGain = this.ctx.createGain()
     this.duckGain.connect(this.ctx.destination)
@@ -556,7 +620,13 @@ export class StemEngine {
     this.cancelPendingSeek()
     this.stopSources()
     this.listeners.clear()
-    void this.ctx.close()
+    // The context is shared and session-lived (audioUnlock.ts) — never close
+    // it here. Detach this engine's whole node tree from the destination so a
+    // replacement engine on the same context starts clean and no stale gain
+    // node can route a stray source to the output.
+    for (const name of STEM_NAMES) this.gains[name].disconnect()
+    this.masterGain.disconnect()
+    this.duckGain.disconnect()
   }
 
   // ---- internals ----

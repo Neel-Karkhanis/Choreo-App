@@ -1,6 +1,5 @@
 antlr4-python3-runtime==4.9.3
 audioread==3.1.0
-bcrypt==5.0.0
 beat_this @ git+https://github.com/CPJKU/beat_this.git
 certifi==2026.2.25
 cffi==2.0.0
@@ -73,3 +72,5 @@ fastapi==0.139.0
 pydantic==2.13.4
 uvicorn[standard]==0.51.0
 python-multipart==0.0.32
+limits==5.8.0
+slowapi==0.1.10

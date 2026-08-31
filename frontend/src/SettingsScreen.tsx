@@ -1,7 +1,6 @@
 import { useAccentColor } from './accentColor'
-import { apiFetch } from './api'
 import { COUNT_DISPLAY_LABELS, COUNT_DISPLAY_MODES, useCountDisplay } from './countDisplay'
-import { API_BASE, SNAP_MODE_LABELS, SNAP_MODES, useDefaultSnapMode } from './snap'
+import { SNAP_MODE_LABELS, SNAP_MODES, useDefaultSnapMode } from './snap'
 import { toggleStyle } from './styles'
 
 // LEVEL 1 sibling of Library (App.tsx's View): its own screen, not a
@@ -15,29 +14,15 @@ import { toggleStyle } from './styles'
 // labeled sections) to match the rest of the app's
 // placeholder-styling-pending-a-design-pass look (see e.g. SpeedControl's own
 // comment in controls.tsx).
-export default function SettingsScreen({
-  onExit,
-  onSignedOut,
-}: {
-  onExit: () => void
-  onSignedOut: () => void
-}) {
+//
+// No Account section: there are no accounts, nothing to sign out of. A
+// device's data lives and dies with its device-id cookie/IndexedDB mirror
+// (see device.ts) — Export/Import (a later phase) is the only way to move it
+// anywhere else.
+export default function SettingsScreen({ onExit }: { onExit: () => void }) {
   const { accentId, setAccentId, options } = useAccentColor()
   const { defaultSnapMode, setDefaultSnapMode } = useDefaultSnapMode()
   const { countDisplay, setCountDisplay } = useCountDisplay()
-
-  // Best-effort: the cookie is httponly and short of asking the backend to
-  // drop it, there's nothing else client-side holding a session open. Signs
-  // out locally regardless of whether the request itself succeeds — a
-  // network hiccup here shouldn't trap someone on a "log out" button that
-  // does nothing, and the cookie's own expiry is the backstop either way.
-  const signOut = async () => {
-    try {
-      await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' })
-    } finally {
-      onSignedOut()
-    }
-  }
 
   return (
     <main className="settings">
@@ -115,12 +100,6 @@ export default function SettingsScreen({
         </div>
       </section>
 
-      <section className="settings-section">
-        <h2 className="settings-section-title">Account</h2>
-        <button type="button" onClick={() => void signOut()}>
-          Log out
-        </button>
-      </section>
     </main>
   )
 }
