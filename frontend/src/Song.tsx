@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from './api'
 import { getAudioContext } from './audioUnlock'
 import Logo from './Logo'
@@ -7,7 +7,7 @@ import VideoScreen from './VideoScreen'
 import { readCountDisplay, type CountDisplay } from './countDisplay'
 import { buildEightCountWindows } from './eightCount'
 import { useManualGrid, type ManualGridStore } from './manualGrid'
-import { useEngineTransport, useLoop, useSpeed } from './playback'
+import { useEngineTransport, useLoop, useSpeed, type Transport } from './playback'
 import { API_BASE, readDefaultSnapMode, snapTime, type SnapDirection, type SnapMode } from './snap'
 import { DEFAULT_STEM_MODE, StemEngine, loadStems, type StemMode } from './stemEngine'
 import { useTapSession } from './tapSession'
@@ -154,6 +154,70 @@ function LoadingStatus({
           This is a one-time load per song.
         </p>
       )}
+    </div>
+  )
+}
+
+const SILENT_MODE_DISMISSED_KEY = 'choreo-silent-mode-dismissed'
+
+function isIOS(): boolean {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+}
+
+function readSilentModeDismissed(): boolean {
+  try {
+    return localStorage.getItem(SILENT_MODE_DISMISSED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * iOS-only, once-ever notice: Web Audio playback is silenced by the ringer /
+ * Silent Mode switch and there's no programmatic fix (see audioUnlock.ts's
+ * quirk 2). This can't detect whether the user actually hears anything, so it
+ * waits until playback is DEMONSTRABLY running — the shared AudioContext is
+ * 'running' and currentTime has advanced while playing — then surfaces the
+ * hint. Dismissal is persisted in localStorage, so it appears at most once
+ * across all sessions, not every time.
+ */
+function SilentModeNotice({ transport }: { transport: Transport }) {
+  const [dismissed, setDismissed] = useState(readSilentModeDismissed)
+  const [playbackProven, setPlaybackProven] = useState(false)
+  const lastTimeRef = useRef(transport.currentTime)
+
+  useEffect(() => {
+    if (dismissed || playbackProven || !isIOS()) return
+    const advanced = transport.currentTime > lastTimeRef.current + 0.2
+    lastTimeRef.current = transport.currentTime
+    if (transport.isPlaying && advanced && getAudioContext().state === 'running') {
+      setPlaybackProven(true)
+    }
+  }, [transport.isPlaying, transport.currentTime, dismissed, playbackProven])
+
+  if (dismissed || !playbackProven || !isIOS()) return null
+
+  const dismiss = () => {
+    try {
+      localStorage.setItem(SILENT_MODE_DISMISSED_KEY, 'true')
+    } catch {
+      // Best effort, same as InstallPrompt's own dismiss — worst case the
+      // notice can reappear in a later session.
+    }
+    setDismissed(true)
+  }
+
+  return (
+    <div className="silent-mode-notice" role="note">
+      <span>Playing. If you hear nothing, make sure Silent Mode is off.</span>
+      <button
+        type="button"
+        className="silent-mode-notice-dismiss"
+        onClick={dismiss}
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
     </div>
   )
 }
@@ -307,16 +371,20 @@ export default function Song({
     // timeline block in the viewport — see index.css. Withheld during the
     // loading screens so the lone header doesn't float to mid-screen.
     <main className={engine ? 'song song--centered' : 'song'}>
+      {/* Header is a direct child of .song (a sibling of .song-scroll), NOT
+          inside it — so .song--centered can vertically center only the
+          timeline block below while this stays pinned at the top of the
+          screen (see index.css). */}
+      <header className="song-head">
+        <div className="song-head-left">
+          <button className="song-back" onClick={onExit} aria-label="Back to library">
+            ←
+          </button>
+          <h1>{title}</h1>
+        </div>
+        <Logo size={29} />
+      </header>
       <div className="song-scroll">
-        <header className="song-head">
-          <div className="song-head-left">
-            <button className="song-back" onClick={onExit} aria-label="Back to library">
-              ←
-            </button>
-            <h1>{title}</h1>
-          </div>
-          <Logo size={29} />
-        </header>
         {error && <p className="error">{error}</p>}
         {onsetsError && <p className="error">Onset overlays unavailable: {onsetsError}</p>}
         {stemError && <p className="error">Stems unavailable: {stemError}</p>}
@@ -468,6 +536,7 @@ function SongShell({
 
   return (
     <>
+      <SilentModeNotice transport={transport} />
       {screens.length > 1 && (
         <nav className="screen-tabs" role="group" aria-label="Screen">
           {screens.map((name) => (

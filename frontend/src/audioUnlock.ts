@@ -1,32 +1,28 @@
 // iOS audio unlock, done once per session from the first real user gesture.
-// Two platform quirks, one fix each:
+// Two platform quirks:
 //
 //   1. An AudioContext created OUTSIDE a user gesture starts life `suspended`
 //      on iOS, and a later resume() is not a dependable way back. So the app's
 //      single AudioContext is created HERE — synchronously inside the first
 //      touchstart / click / keydown — and never inside loadStems' async chain
 //      (see Song.tsx). getAudioContext() hands that one instance to every
-//      StemEngine.
+//      StemEngine. This is the load-bearing fix and it works.
 //
 //   2. A pure Web Audio graph (which the stem engine is — there is no <audio>
 //      element anywhere in its sound path) is silenced by the hardware ringer
-//      switch on iOS. A muted, looping <audio> element that is merely *playing*
-//      — never routed through Web Audio — takes this page's audio out of that
-//      behavior for the rest of the session. It is a session hint and nothing
-//      else: it is not connected to any node and nothing reads from it.
+//      switch / Silent Mode on iOS. There is no reliable programmatic way out
+//      of that from a Web Audio-only page — a muted looping <audio> hint was
+//      tried and did NOT help on a real device, so it was removed rather than
+//      left dead in the page. The app handles this in the UI instead: while
+//      playback is demonstrably running it shows a one-time, dismissible
+//      "check Silent Mode" notice on iOS (see SilentModeNotice in Song.tsx).
 //
-// If the <audio> hint turns out not to help on a real device, delete it (the
-// `try` block in unlock()) rather than leaving a dead element in the page. If
-// the whole approach is abandoned, delete this file and the installAudioUnlock
-// call in main.tsx; StemEngine would then need `new AudioContext()` back.
+// If the whole approach is abandoned, delete this file and the
+// installAudioUnlock call in main.tsx; StemEngine would then need
+// `new AudioContext()` back.
 
 let sharedCtx: AudioContext | null = null
 let unlocked = false
-
-// ~0.15s of 8-bit silence, mono, 8 kHz. Inlined so the ringer-switch hint has
-// no network dependency and works on first paint / offline.
-const SILENT_WAV =
-  'data:audio/wav;base64,UklGRtQEAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YbAEAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA='
 
 /**
  * The app's one and only AudioContext. Created lazily, but in practice the
@@ -60,22 +56,6 @@ function unlock(): void {
   } catch {
     // Non-fatal: resume() above may still take, and StemEngine.play() calls
     // resume() again on every play.
-  }
-
-  // Ringer-switch hint (quirk 2). Best-effort — the AudioContext unlock above
-  // is the load-bearing part. NOT routed through Web Audio by design.
-  try {
-    const el = document.createElement('audio')
-    el.src = SILENT_WAV
-    el.loop = true
-    el.muted = true
-    el.setAttribute('playsinline', '')
-    el.setAttribute('aria-hidden', 'true')
-    el.style.display = 'none'
-    document.body.appendChild(el)
-    void el.play().catch(() => {})
-  } catch {
-    // No <audio> / DOM unavailable — skip the hint.
   }
 }
 
