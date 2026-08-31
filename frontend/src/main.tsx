@@ -3,10 +3,16 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { registerServiceWorker } from './registerServiceWorker'
+import { installAudioUnlock } from './audioUnlock'
 import { applyStoredTheme } from './theme'
 import { applyStoredAccent } from './accentColor'
 
 registerServiceWorker()
+
+// Arms one-shot gesture listeners that create + unlock the shared AudioContext
+// and start the muted <audio> ringer-switch hint. Must run before any tap
+// reaches the app — see audioUnlock.ts.
+installAudioUnlock()
 
 // Runs before the first React commit so a stored dark-mode preference is on
 // the root element before anything paints — doing this only inside

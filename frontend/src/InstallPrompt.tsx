@@ -119,8 +119,8 @@ export default function InstallPrompt() {
     return (
       <div className="install-prompt" role="note">
         <span>
-          Add Choreo to your Home Screen so your tapped grids survive even when you don't open it for
-          a while: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
+          Add Choreo to your Home Screen: tap the three dots next to the URL &rarr; tap{' '}
+          <strong>Share</strong> &rarr; tap <strong>Add to Home Screen</strong>.
         </span>
         <button type="button" className="install-prompt-dismiss" onClick={dismiss} aria-label="Dismiss">
           ×

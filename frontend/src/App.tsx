@@ -12,12 +12,13 @@ import type { LibrarySong } from './types'
 //
 // A song is opened by MOUNTING Song and closed by UNMOUNTING it. That is the
 // whole navigation model, and it is deliberately not a URL router or a stack:
-// unmount is what guarantees the engine's AudioContext is closed, its sources
-// stopped, and its event listeners dropped, because that teardown hangs off
-// Song's own cleanup. Anything that kept a Song mounted "in the background"
-// would keep an AudioContext alive with it. Settings carries no such
-// teardown concern (no engine, no AudioContext), so it's plain mount/unmount
-// like Library, just a third View variant rather than its own special case.
+// unmount is what guarantees the engine's sources are stopped, its node tree
+// detached from the (shared, session-lived) AudioContext, and its event
+// listeners dropped, because that teardown hangs off Song's own cleanup.
+// Anything that kept a Song mounted "in the background" would keep an engine
+// (and a second copy of the audio) alive with it. Settings carries no such
+// teardown concern (no engine), so it's plain mount/unmount like Library,
+// just a third View variant rather than its own special case.
 //
 // There is no sign-in screen: the app has no accounts. 'checking' is only
 // ever the one moment on startup where the device-id cookie is being

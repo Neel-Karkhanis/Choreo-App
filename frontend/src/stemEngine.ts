@@ -373,14 +373,20 @@ export class StemEngine {
   private peaksCache = new Map<StemMode, Float32Array[]>()
   private displayCache = new Map<StemMode, AudioBuffer>()
 
-  constructor(buffers: StemBuffers) {
+  constructor(buffers: StemBuffers, ctx: AudioContext) {
     this.buffers = buffers
     // The original mix is the authoritative track length; stems can differ by
     // a few ms of codec padding and simply end when their buffers run out.
     this.duration = buffers.original.duration
     this.minBufferDuration = Math.min(...STEM_NAMES.map((n) => buffers[n].duration))
-    // 44.1k context so the original buffer plays without a resample.
-    this.ctx = new AudioContext({ sampleRate: 44100 })
+    // The context is created once per session, inside the first user gesture,
+    // and shared across every engine (see audioUnlock.ts) — creating it in
+    // this constructor instead left it `suspended` on iOS, since the
+    // constructor runs deep inside loadStems' async chain with no gesture on
+    // the stack. It is a 44.1k context so the original buffer plays without a
+    // resample. This engine attaches its node tree to ctx.destination here and
+    // detaches it in destroy(); it never closes the context.
+    this.ctx = ctx
     // 5 stem gains -> masterGain (volume/mute) -> duckGain (seek ramp) -> out
     this.duckGain = this.ctx.createGain()
     this.duckGain.connect(this.ctx.destination)
@@ -614,7 +620,13 @@ export class StemEngine {
     this.cancelPendingSeek()
     this.stopSources()
     this.listeners.clear()
-    void this.ctx.close()
+    // The context is shared and session-lived (audioUnlock.ts) — never close
+    // it here. Detach this engine's whole node tree from the destination so a
+    // replacement engine on the same context starts clean and no stale gain
+    // node can route a stray source to the output.
+    for (const name of STEM_NAMES) this.gains[name].disconnect()
+    this.masterGain.disconnect()
+    this.duckGain.disconnect()
   }
 
   // ---- internals ----

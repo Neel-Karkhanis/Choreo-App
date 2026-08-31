@@ -5,14 +5,7 @@ import { useCloseOnOutsideClick } from './dropdown'
 import { formatTime } from './format'
 import InstallPrompt from './InstallPrompt'
 import Logo from './Logo'
-import {
-  buildProjectExport,
-  checkDurationMismatch,
-  downloadProjectFile,
-  importProjectFile,
-  parseProjectFile,
-  type ProjectFile,
-} from './projectFile'
+import { buildProjectExport, downloadProjectFile } from './projectFile'
 import { API_BASE } from './snap'
 import type { LibrarySong } from './types'
 
@@ -390,20 +383,6 @@ export default function Library({
   const [error, setError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  // "Import project" (a .choreo-project.json chart file — see projectFile.ts)
-  // is a separate flow from "Import song" (audio/video) above: different
-  // file type, different endpoint, and this one asks for confirmation
-  // first since it can silently replace an existing tapped grid.
-  const projectFileRef = useRef<HTMLInputElement>(null)
-  const [pendingProjectImport, setPendingProjectImport] = useState<ProjectFile | null>(null)
-  const [projectImportError, setProjectImportError] = useState<string | null>(null)
-  // Set alongside pendingProjectImport when the file's own recorded
-  // duration disagrees with the matching song already in this library —
-  // see projectFile.ts's checkDurationMismatch for why that matters (a
-  // schema v4 grid is index-based, so a duration mismatch means silently
-  // wrong 8-counts, not an error). Advisory only: shown in the confirm
-  // dialog, never blocks it.
-  const [pendingDurationWarning, setPendingDurationWarning] = useState<string | null>(null)
 
   const refresh = useCallback(() => {
     setLoading(true)
@@ -449,38 +428,6 @@ export default function Library({
     }
   }
 
-  // Reads and validates the file locally first (schema_version, shape —
-  // see parseProjectFile), THEN asks for confirmation naming the actual
-  // track it would affect, rather than confirming a bare "import a file?"
-  // before anyone knows what's in it.
-  const onPickProjectFile = async (file: File | undefined) => {
-    if (projectFileRef.current) projectFileRef.current.value = ''
-    if (!file) return
-    setProjectImportError(null)
-    try {
-      const parsed = parseProjectFile(await file.text())
-      setPendingProjectImport(parsed)
-      const existing = songs.find((s) => s.md5 === parsed.track.md5)
-      setPendingDurationWarning(checkDurationMismatch(existing?.duration, parsed.track.duration))
-    } catch (err) {
-      setProjectImportError(String(err))
-    }
-  }
-
-  const confirmProjectImport = async () => {
-    const file = pendingProjectImport
-    setPendingProjectImport(null)
-    setPendingDurationWarning(null)
-    if (!file) return
-    setProjectImportError(null)
-    try {
-      await importProjectFile(file)
-      await refresh()
-    } catch (err) {
-      setProjectImportError(String(err))
-    }
-  }
-
   return (
     <main className="library">
       <header className="library-head">
@@ -499,16 +446,6 @@ export default function Library({
           <button className="import-button" onClick={() => fileRef.current?.click()} disabled={importing}>
             {importing ? 'Importing…' : 'Import song'}
           </button>
-          <input
-            ref={projectFileRef}
-            type="file"
-            accept="application/json,.json"
-            hidden
-            onChange={(e) => void onPickProjectFile(e.target.files?.[0])}
-          />
-          <button className="import-button" onClick={() => projectFileRef.current?.click()}>
-            Import project
-          </button>
           <SettingsButton onOpen={onOpenSettings} />
         </div>
       </header>
@@ -516,36 +453,9 @@ export default function Library({
       <InstallPrompt />
 
       {error && <p className="error">{error}</p>}
-      {projectImportError && <p className="error">{projectImportError}</p>}
-      <ConfirmDialog
-        open={pendingProjectImport !== null}
-        title="Import project"
-        body={
-          <>
-            Import project data for &ldquo;{pendingProjectImport?.track.filename ?? pendingProjectImport?.track.md5}
-            &rdquo;? {pendingProjectImport?.manual_grid
-              ? 'This replaces any existing tapped grid for this song.'
-              : "This file has no tapped grid — only the song's title and duration will be recorded."}
-            {' '}The source audio itself is not part of the file; re-import it separately if needed.
-            {pendingDurationWarning && (
-              <>
-                <br />
-                <br />
-                ⚠ {pendingDurationWarning}
-              </>
-            )}
-          </>
-        }
-        confirmLabel="Import"
-        onCancel={() => {
-          setPendingProjectImport(null)
-          setPendingDurationWarning(null)
-        }}
-        onConfirm={() => void confirmProjectImport()}
-      />
       {loading && songs.length === 0 && <p>Loading library…</p>}
       {!loading && songs.length === 0 && !error && (
-        <p>No songs yet. Import one to get started.</p>
+        <p className="library-empty">No songs yet. Import one to get started.</p>
       )}
 
       <ul className="song-list">

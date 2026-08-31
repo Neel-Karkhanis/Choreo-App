@@ -19,6 +19,7 @@
 // runSec. Results land in window.__vt and in the #results <pre> as JSON;
 // __vt.done flips true when the run completes.
 
+import { getAudioContext } from './audioUnlock'
 import { loadStems, StemEngine } from './stemEngine'
 
 const params = new URLSearchParams(location.search)
@@ -133,7 +134,9 @@ async function main() {
   // — undefined just means "skip the IndexedDB cache", same as before this
   // file's stemEngine.ts grew one.
   const buffers = await loadStems(trackId, undefined)
-  const engine = new StemEngine(buffers)
+  // The driver runs Chrome with --autoplay-policy=no-user-gesture-required, so
+  // this lazily-created context needs no gesture to come up running.
+  const engine = new StemEngine(buffers, getAudioContext())
   statusEl.textContent = 'stems loaded; loading video…'
 
   video.src = videoUrl
